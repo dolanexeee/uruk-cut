@@ -55,8 +55,65 @@ export type ExportStage =
   | { type: "preparing" }
   | { type: "segment"; index: number; total: number }
   | { type: "joining" }
+  | { type: "finishing" }
   | { type: "done" }
   | { type: "error"; message: string };
+
+/* ---------------- Phase 2 types ---------------- */
+
+export interface WordTiming {
+  word: string;
+  start: number; // seconds, in the SOURCE asset's timeline
+  end: number;
+}
+
+export interface CaptionCue {
+  id: string;
+  start: number; // seconds, in the SOURCE asset's timeline
+  end: number;
+  text: string;
+  words?: WordTiming[];
+}
+
+export type CaptionStyleId = "classic" | "yellow" | "minimal" | "karaoke";
+export type WhisperModelId = "tiny" | "base" | "small";
+export type SpeechLang = "auto" | "ar" | "en";
+
+export interface CaptionJob {
+  assetId: string;
+  stage: "extract" | "download" | "transcribe";
+  progress: number; // 0..1 (download file progress; coarse otherwise)
+  detail: string;
+}
+
+export interface TextOverlay {
+  id: string;
+  text: string;
+  start: number; // timeline seconds
+  duration: number; // seconds
+  position: "top" | "center" | "bottom";
+  size: number; // font size as a fraction of frame height (0.03..0.14)
+  color: string; // #rrggbb
+  bold: boolean;
+  pill: boolean;
+}
+
+export interface MusicTrack {
+  id: string;
+  name: string;
+  file: File;
+  url: string;
+  duration: number; // seconds in the audio file
+  start: number; // timeline offset, seconds
+  trimStart: number; // seconds into the audio file
+  trimEnd: number;
+  volume: number; // 0..1
+  fadeIn: number; // seconds, 0..2
+  fadeOut: number; // seconds, 0..2
+  peaks: number[]; // normalized 0..1 amplitude bars
+}
+
+export const musicDuration = (m: MusicTrack) => Math.max(0, m.trimEnd - m.trimStart);
 
 interface EditorState {
   lang: Lang;
@@ -100,6 +157,39 @@ interface EditorState {
   setExportState: (
     p: Partial<Pick<EditorState, "exporting" | "exportProgress" | "exportStage" | "exportUrl">>
   ) => void;
+
+  /* Phase 2 state */
+  captionsByAsset: Record<string, CaptionCue[]>;
+  captionsEnabled: boolean;
+  captionStyle: CaptionStyleId;
+  whisperModel: WhisperModelId;
+  speechLang: SpeechLang;
+  captionJob: CaptionJob | null;
+  captionError: string | null;
+  selectedCue: { assetId: string; cueId: string } | null;
+  textOverlays: TextOverlay[];
+  selectedTextId: string | null;
+  music: MusicTrack | null;
+  keepOriginalAudio: boolean;
+
+  setCaptionsEnabled: (b: boolean) => void;
+  setCaptionStyle: (s: CaptionStyleId) => void;
+  setWhisperModel: (m: WhisperModelId) => void;
+  setSpeechLang: (l: SpeechLang) => void;
+  setCaptionJob: (j: CaptionJob | null) => void;
+  setCaptionError: (msg: string | null) => void;
+  setAssetCaptions: (assetId: string, cues: CaptionCue[]) => void;
+  updateCue: (assetId: string, cueId: string, patch: Partial<CaptionCue>) => void;
+  deleteCue: (assetId: string, cueId: string) => void;
+  addCue: (assetId: string, start: number) => CaptionCue;
+  selectCue: (sel: { assetId: string; cueId: string } | null) => void;
+  addTextOverlay: () => void;
+  updateTextOverlay: (id: string, patch: Partial<TextOverlay>) => void;
+  deleteTextOverlay: (id: string) => void;
+  selectText: (id: string | null) => void;
+  setMusic: (m: MusicTrack | null) => void;
+  updateMusic: (patch: Partial<MusicTrack>) => void;
+  setKeepOriginalAudio: (b: boolean) => void;
 }
 
 const snapshot = (clips: Clip[]): Clip[] => clips.map((c) => ({ ...c }));
@@ -230,4 +320,94 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }),
 
   setExportState: (p) => set(p),
+
+  captionsByAsset: {},
+  captionsEnabled: true,
+  captionStyle: "classic",
+  whisperModel: "small",
+  speechLang: "auto",
+  captionJob: null,
+  captionError: null,
+  selectedCue: null,
+  textOverlays: [],
+  selectedTextId: null,
+  music: null,
+  keepOriginalAudio: true,
+
+  setCaptionsEnabled: (b) => set({ captionsEnabled: b }),
+  setCaptionStyle: (s) => set({ captionStyle: s }),
+  setWhisperModel: (m) => set({ whisperModel: m }),
+  setSpeechLang: (l) => set({ speechLang: l }),
+  setCaptionJob: (j) => set({ captionJob: j }),
+  setCaptionError: (msg) => set({ captionError: msg }),
+  setAssetCaptions: (assetId, cues) =>
+    set((s) => ({ captionsByAsset: { ...s.captionsByAsset, [assetId]: cues } })),
+  updateCue: (assetId, cueId, patch) =>
+    set((s) => ({
+      captionsByAsset: {
+        ...s.captionsByAsset,
+        [assetId]: (s.captionsByAsset[assetId] || []).map((c) =>
+          c.id === cueId ? { ...c, ...patch } : c
+        ),
+      },
+    })),
+  deleteCue: (assetId, cueId) =>
+    set((s) => ({
+      captionsByAsset: {
+        ...s.captionsByAsset,
+        [assetId]: (s.captionsByAsset[assetId] || []).filter((c) => c.id !== cueId),
+      },
+      selectedCue:
+        s.selectedCue && s.selectedCue.assetId === assetId && s.selectedCue.cueId === cueId
+          ? null
+          : s.selectedCue,
+    })),
+  addCue: (assetId, start) => {
+    const cue: CaptionCue = {
+      id: uid("cue"),
+      start: Math.max(0, start),
+      end: Math.max(0, start) + 2,
+      text: "",
+    };
+    set((s) => ({
+      captionsByAsset: {
+        ...s.captionsByAsset,
+        [assetId]: [...(s.captionsByAsset[assetId] || []), cue].sort((a, b) => a.start - b.start),
+      },
+      selectedCue: { assetId, cueId: cue.id },
+    }));
+    return cue;
+  },
+  selectCue: (sel) => set({ selectedCue: sel }),
+
+  addTextOverlay: () =>
+    set((s) => {
+      const ov: TextOverlay = {
+        id: uid("txt"),
+        text: "",
+        start: Math.max(0, s.playhead),
+        duration: 3,
+        position: "top",
+        size: 0.07,
+        color: "#ffffff",
+        bold: true,
+        pill: true,
+      };
+      return { textOverlays: [...s.textOverlays, ov], selectedTextId: ov.id };
+    }),
+  updateTextOverlay: (id, patch) =>
+    set((s) => ({
+      textOverlays: s.textOverlays.map((o) => (o.id === id ? { ...o, ...patch } : o)),
+    })),
+  deleteTextOverlay: (id) =>
+    set((s) => ({
+      textOverlays: s.textOverlays.filter((o) => o.id !== id),
+      selectedTextId: s.selectedTextId === id ? null : s.selectedTextId,
+    })),
+  selectText: (id) => set({ selectedTextId: id }),
+
+  setMusic: (m) => set({ music: m }),
+  updateMusic: (patch) =>
+    set((s) => (s.music ? { music: { ...s.music, ...patch } } : s)),
+  setKeepOriginalAudio: (b) => set({ keepOriginalAudio: b }),
 }));

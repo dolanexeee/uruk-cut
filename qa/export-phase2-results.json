@@ -1,0 +1,18 @@
+{
+  "wasm": {
+    "diff": {
+      "meanAbsDiff": 14.75310952970297,
+      "pctPixelsChanged": 10.298576732673267
+    },
+    "capDuration": "5.033333"
+  },
+  "native": {
+    "diff": {
+      "meanAbsDiff": 26.416986386138614,
+      "pctPixelsChanged": 18.59839108910891
+    },
+    "capDuration": "5.034000",
+    "meanVolumeWithMusic": -14.2,
+    "meanVolumeWithoutMusic": -91
+  }
+}

@@ -1,16 +1,27 @@
 "use client";
 
 import { useMemo, useRef } from "react";
-import { clipDuration, totalDuration, useEditorStore } from "../store/editor";
+import {
+  clipDuration,
+  musicDuration,
+  totalDuration,
+  useEditorStore,
+} from "../store/editor";
+import { buildTimelineCues } from "../lib/captions";
 import { dict } from "../i18n";
 
 const TRACK_H = 76;
 const HANDLE_W = 14;
+const CUE_H = 24;
+const TEXT_H = 28;
+const AUDIO_H = 36;
 
 type DragState =
   | { kind: "trim-left" | "trim-right"; clipId: string; startX: number; origStart: number; origEnd: number; sourceDur: number }
   | { kind: "reorder"; clipId: string; startX: number; moved: boolean }
   | { kind: "scrub"; startX: number }
+  | { kind: "text-move" | "text-left" | "text-right"; id: string; startX: number; origStart: number; origDur: number }
+  | { kind: "music-move" | "music-left" | "music-right"; startX: number; origStart: number; origTrimStart: number; origTrimEnd: number; fileDur: number }
   | null;
 
 export default function Timeline() {
@@ -21,6 +32,17 @@ export default function Timeline() {
   const pxPerSec = useEditorStore((s) => s.pxPerSec);
   const lang = useEditorStore((s) => s.lang);
   const t = dict[lang];
+  const captionsByAsset = useEditorStore((s) => s.captionsByAsset);
+  const captionsEnabled = useEditorStore((s) => s.captionsEnabled);
+  const selectedCue = useEditorStore((s) => s.selectedCue);
+  const textOverlays = useEditorStore((s) => s.textOverlays);
+  const selectedTextId = useEditorStore((s) => s.selectedTextId);
+  const music = useEditorStore((s) => s.music);
+
+  const tlCues = useMemo(
+    () => (captionsEnabled ? buildTimelineCues(clips, captionsByAsset) : []),
+    [clips, captionsByAsset, captionsEnabled]
+  );
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -144,6 +166,75 @@ export default function Timeline() {
   };
   const endDrag = () => {
     drag.current = null;
+  };
+
+  // ---------- text overlay drag ----------
+  const startTextDrag = (
+    e: React.PointerEvent,
+    id: string,
+    kind: "text-move" | "text-left" | "text-right"
+  ) => {
+    e.stopPropagation();
+    const st = useEditorStore.getState();
+    const ov = st.textOverlays.find((o) => o.id === id);
+    if (!ov) return;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    st.selectText(id);
+    drag.current = { kind, id, startX: e.clientX, origStart: ov.start, origDur: ov.duration };
+  };
+  const onTextMove = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (!d || (d.kind !== "text-move" && d.kind !== "text-left" && d.kind !== "text-right")) return;
+    const rtl = document.documentElement.dir === "rtl";
+    let dx = (e.clientX - d.startX) / pxPerSec;
+    if (rtl) dx = -dx;
+    const st = useEditorStore.getState();
+    if (d.kind === "text-move") {
+      st.updateTextOverlay(d.id, { start: Math.max(0, d.origStart + dx) });
+    } else if (d.kind === "text-left") {
+      const ns = Math.min(Math.max(0, d.origStart + dx), d.origStart + d.origDur - 0.2);
+      st.updateTextOverlay(d.id, { start: ns, duration: d.origDur + (d.origStart - ns) });
+    } else {
+      st.updateTextOverlay(d.id, { duration: Math.max(0.2, d.origDur + dx) });
+    }
+  };
+
+  // ---------- music drag ----------
+  const startMusicDrag = (
+    e: React.PointerEvent,
+    kind: "music-move" | "music-left" | "music-right"
+  ) => {
+    e.stopPropagation();
+    const st = useEditorStore.getState();
+    if (!st.music) return;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    drag.current = {
+      kind,
+      startX: e.clientX,
+      origStart: st.music.start,
+      origTrimStart: st.music.trimStart,
+      origTrimEnd: st.music.trimEnd,
+      fileDur: st.music.duration,
+    };
+  };
+  const onMusicMove = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (!d || (d.kind !== "music-move" && d.kind !== "music-left" && d.kind !== "music-right")) return;
+    const rtl = document.documentElement.dir === "rtl";
+    let dx = (e.clientX - d.startX) / pxPerSec;
+    if (rtl) dx = -dx;
+    const st = useEditorStore.getState();
+    if (d.kind === "music-move") {
+      st.updateMusic({ start: Math.max(0, d.origStart + dx) });
+    } else if (d.kind === "music-left") {
+      // Content-anchored: moving the left edge shifts offset + trim together.
+      const maxShift = d.origTrimEnd - d.origTrimStart - 0.1;
+      const shift = Math.min(Math.max(dx, -d.origTrimStart), maxShift);
+      st.updateMusic({ start: Math.max(0, d.origStart + shift), trimStart: d.origTrimStart + shift });
+    } else {
+      const ne = Math.min(Math.max(d.origTrimEnd + dx, d.origTrimStart + 0.1), d.fileDur);
+      st.updateMusic({ trimEnd: ne });
+    }
   };
 
   // ---------- ruler ticks ----------
@@ -276,6 +367,133 @@ export default function Timeline() {
               </div>
             )}
           </div>
+
+          {/* Captions row */}
+          {tlCues.length > 0 && (
+            <div className="relative border-t border-zinc-800/70" style={{ height: CUE_H }} data-testid="caption-row">
+              {tlCues.map((cue) => {
+                const selected =
+                  selectedCue && selectedCue.assetId === cue.assetId && selectedCue.cueId === cue.id;
+                return (
+                  <button
+                    key={`${cue.clipId}-${cue.id}-${cue.timelineStart}`}
+                    type="button"
+                    data-testid="cue-block"
+                    className={`absolute top-[3px] truncate rounded border px-1 text-start text-[10px] leading-[16px] ${
+                      selected
+                        ? "border-[#d9a441] bg-[#d9a441]/25 text-[#f3cd8a]"
+                        : "border-zinc-700 bg-zinc-800/80 text-zinc-300"
+                    }`}
+                    style={{
+                      insetInlineStart: cue.timelineStart * pxPerSec,
+                      width: Math.max((cue.timelineEnd - cue.timelineStart) * pxPerSec, 10),
+                      height: CUE_H - 6,
+                    }}
+                    onClick={() => {
+                      useEditorStore.getState().selectCue({ assetId: cue.assetId, cueId: cue.id });
+                      useEditorStore.getState().seekTo(cue.timelineStart + 0.01);
+                    }}
+                  >
+                    {cue.text}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Text overlays row */}
+          {textOverlays.length > 0 && (
+            <div className="relative border-t border-zinc-800/70" style={{ height: TEXT_H }} data-testid="text-row">
+              {textOverlays.map((ov) => {
+                const selected = ov.id === selectedTextId;
+                const w = Math.max(ov.duration * pxPerSec, 12);
+                return (
+                  <div
+                    key={ov.id}
+                    data-testid="text-block"
+                    data-text-id={ov.id}
+                    className={`absolute top-[3px] flex touch-none select-none overflow-hidden rounded border ${
+                      selected ? "border-[#d9a441] bg-sky-950/80 ring-1 ring-[#d9a441]" : "border-sky-900 bg-sky-950/60"
+                    }`}
+                    style={{ insetInlineStart: ov.start * pxPerSec, width: w, height: TEXT_H - 6 }}
+                    onPointerDown={(e) => startTextDrag(e, ov.id, "text-move")}
+                    onPointerMove={onTextMove}
+                    onPointerUp={endDrag}
+                    onPointerCancel={endDrag}
+                  >
+                    <span className="pointer-events-none flex-1 truncate px-1 text-[10px] leading-[20px] text-sky-200">
+                      {ov.text || "T"}
+                    </span>
+                    <div
+                      className="absolute inset-y-0 start-0 z-10 w-3 cursor-ew-resize touch-none"
+                      onPointerDown={(e) => startTextDrag(e, ov.id, "text-left")}
+                      onPointerMove={onTextMove}
+                      onPointerUp={endDrag}
+                      onPointerCancel={endDrag}
+                    />
+                    <div
+                      className="absolute inset-y-0 end-0 z-10 w-3 cursor-ew-resize touch-none"
+                      onPointerDown={(e) => startTextDrag(e, ov.id, "text-right")}
+                      onPointerMove={onTextMove}
+                      onPointerUp={endDrag}
+                      onPointerCancel={endDrag}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Music row */}
+          {music && (
+            <div className="relative border-t border-zinc-800/70" style={{ height: AUDIO_H }} data-testid="audio-row">
+              {(() => {
+                const dur = musicDuration(music);
+                const w = Math.max(dur * pxPerSec, 12);
+                const from = Math.floor((music.trimStart / Math.max(music.duration, 0.01)) * music.peaks.length);
+                const to = Math.ceil((music.trimEnd / Math.max(music.duration, 0.01)) * music.peaks.length);
+                const bars = music.peaks.slice(Math.max(0, from), Math.min(music.peaks.length, to));
+                return (
+                  <div
+                    data-testid="music-block"
+                    className="absolute top-[3px] flex touch-none select-none overflow-hidden rounded border border-emerald-900 bg-emerald-950/60"
+                    style={{ insetInlineStart: music.start * pxPerSec, width: w, height: AUDIO_H - 6 }}
+                    onPointerDown={(e) => startMusicDrag(e, "music-move")}
+                    onPointerMove={onMusicMove}
+                    onPointerUp={endDrag}
+                    onPointerCancel={endDrag}
+                  >
+                    <div className="pointer-events-none flex h-full flex-1 items-center gap-[1px] px-1" dir="ltr">
+                      {bars.map((p, i) => (
+                        <div
+                          key={i}
+                          className="min-w-[1px] flex-1 rounded-sm bg-emerald-400/60"
+                          style={{ height: `${Math.max(10, p * 100)}%` }}
+                        />
+                      ))}
+                    </div>
+                    <span className="pointer-events-none absolute bottom-0 start-1 text-[9px] text-emerald-200/80">
+                      ♪ {music.name}
+                    </span>
+                    <div
+                      className="absolute inset-y-0 start-0 z-10 w-3 cursor-ew-resize touch-none"
+                      onPointerDown={(e) => startMusicDrag(e, "music-left")}
+                      onPointerMove={onMusicMove}
+                      onPointerUp={endDrag}
+                      onPointerCancel={endDrag}
+                    />
+                    <div
+                      className="absolute inset-y-0 end-0 z-10 w-3 cursor-ew-resize touch-none"
+                      onPointerDown={(e) => startMusicDrag(e, "music-right")}
+                      onPointerMove={onMusicMove}
+                      onPointerUp={endDrag}
+                      onPointerCancel={endDrag}
+                    />
+                  </div>
+                );
+              })()}
+            </div>
+          )}
 
           {/* Playhead */}
           {clips.length > 0 && (

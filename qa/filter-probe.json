@@ -1,0 +1,34 @@
+{
+  "probedAt": "2026-10-16T22:46:51.996Z",
+  "nativeSidecar": {
+    "binary": "src-tauri/binaries/uruk-ffmpeg (johnvansickle static 7.0.2)",
+    "filters": {
+      "subtitles": true,
+      "ass": true,
+      "drawtext": false,
+      "amix": true,
+      "afade": true,
+      "volume": true,
+      "aresample": true,
+      "aformat": true,
+      "anullsrc": true,
+      "color": true
+    }
+  },
+  "wasmCore": {
+    "package": "@ffmpeg/core 0.12.x (ffmpeg-core.wasm)",
+    "filters": {
+      "subtitles": true,
+      "ass": true,
+      "drawtext": true,
+      "amix": true,
+      "afade": true,
+      "volume": true,
+      "aresample": true,
+      "aformat": true,
+      "anullsrc": true,
+      "color": true
+    },
+    "error": null
+  }
+}

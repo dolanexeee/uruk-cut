@@ -103,6 +103,7 @@ try {
 
   // ---- split: click into first clip (seeks), then click Split button ----
   const firstClip = page.locator('[data-testid="clip-block"]').first();
+  await firstClip.scrollIntoViewIfNeeded(); // Phase 2 panels make the page taller
   const box = await firstClip.boundingBox();
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await page.waitForTimeout(300);
@@ -119,6 +120,7 @@ try {
   // ---- trim: real pointer drag on the last clip's right handle, -48px ≈ -1s ----
   const blocks = page.locator('[data-testid="clip-block"]');
   const last = blocks.nth(2);
+  await last.scrollIntoViewIfNeeded();
   const handle = last.locator('[data-testid="trim-right"]');
   const hb = await handle.boundingBox();
   const before = await page.evaluate(() => {

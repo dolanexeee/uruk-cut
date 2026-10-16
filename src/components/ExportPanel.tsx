@@ -20,6 +20,8 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
         return `${t.encodingSegment} ${stage.index + 1}/${stage.total}`;
       case "joining":
         return t.joiningSegments;
+      case "finishing":
+        return t.finishing;
       case "done":
         return t.exportDone;
       case "error":

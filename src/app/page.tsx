@@ -7,8 +7,10 @@ import Timeline from "../components/Timeline";
 import Toolbar from "../components/Toolbar";
 import ImportManager from "../components/ImportManager";
 import ExportPanel from "../components/ExportPanel";
+import Panels from "../components/Panels";
 import { useEditorStore } from "../store/editor";
 import { exportVideo } from "../lib/export";
+import { buildExportExtras } from "../lib/finalpass";
 import { dict } from "../i18n";
 
 export default function Page() {
@@ -42,7 +44,8 @@ export default function Page() {
     });
     setPanelOpen(true);
     try {
-      const blob = await exportVideo(st.clips, st.assets, {
+      const extras = buildExportExtras(st);
+      const blob = await exportVideo(st.clips, st.assets, extras, {
         onStage: (stage, progress) =>
           useEditorStore.getState().setExportState({ exportStage: stage, exportProgress: progress }),
       });
@@ -72,6 +75,7 @@ export default function Page() {
       <main className="flex flex-1 flex-col gap-3 px-3 py-3 sm:px-4">
         <Preview />
         <ImportManager />
+        {clips.length > 0 && <Panels />}
         <div className="mt-auto flex flex-col gap-2 pb-2">
           <Toolbar />
           <Timeline />

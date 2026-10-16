@@ -1,13 +1,17 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   clipDuration,
   locateTime,
+  musicDuration,
   totalDuration,
   useEditorStore,
+  type CaptionCue,
 } from "../store/editor";
 import { dict } from "../i18n";
+
+const CAPTION_FONT_STACK = '"Noto Sans Arabic", "Inter", system-ui, sans-serif';
 
 export function formatTime(sec: number): string {
   if (!isFinite(sec) || sec < 0) sec = 0;
@@ -28,8 +32,58 @@ export default function Preview() {
   const seekTo = useEditorStore((s) => s.seekTo);
   const lang = useEditorStore((s) => s.lang);
   const t = dict[lang];
+  const captionsByAsset = useEditorStore((s) => s.captionsByAsset);
+  const captionsEnabled = useEditorStore((s) => s.captionsEnabled);
+  const captionStyle = useEditorStore((s) => s.captionStyle);
+  const textOverlays = useEditorStore((s) => s.textOverlays);
+  const music = useEditorStore((s) => s.music);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const [frameH, setFrameH] = useState(0);
+
+  // Measure the preview frame so overlay font sizes scale like the export's
+  // (ASS sizes are fractions of frame height).
+  useEffect(() => {
+    const el = frameRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setFrameH(el.clientHeight));
+    ro.observe(el);
+    setFrameH(el.clientHeight);
+    return () => ro.disconnect();
+  }, []);
+
+  /** Sync the music <audio> element to a timeline position. */
+  const syncMusic = (tPos: number, autoplay: boolean) => {
+    const a = audioRef.current;
+    const m = useEditorStore.getState().music;
+    if (!a) return;
+    if (!m) {
+      if (!a.paused) a.pause();
+      return;
+    }
+    const dur = musicDuration(m);
+    const local = tPos - m.start;
+    if (local < 0 || local > dur) {
+      if (!a.paused) a.pause();
+      return;
+    }
+    const target = m.trimStart + local;
+    if (Math.abs(a.currentTime - target) > 0.35) {
+      try {
+        a.currentTime = target;
+      } catch {
+        // metadata not ready yet; next tick retries
+      }
+    }
+    let fade = 1;
+    if (m.fadeIn > 0.01) fade = Math.min(fade, Math.max(0, local / m.fadeIn));
+    if (m.fadeOut > 0.01) fade = Math.min(fade, Math.max(0, (dur - local) / m.fadeOut));
+    a.volume = Math.min(1, Math.max(0, m.volume * fade));
+    if (autoplay && a.paused) a.play().catch(() => undefined);
+    if (!autoplay && !a.paused) a.pause();
+  };
   const loadedClipId = useRef<string | null>(null);
   const loadedSrc = useRef<string | null>(null);
   const rafRef = useRef<number>(0);
@@ -91,9 +145,18 @@ export default function Preview() {
       align(true);
     } else {
       video.pause();
+      syncMusic(useEditorStore.getState().playhead, false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing]);
+
+  // Keep the music element aligned after seeks / music edits while paused.
+  useEffect(() => {
+    if (!useEditorStore.getState().playing) {
+      syncMusic(useEditorStore.getState().playhead, false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seekNonce, music]);
 
   // Playback loop: sync playhead from the video clock, advance across clips.
   useEffect(() => {
@@ -121,6 +184,7 @@ export default function Preview() {
           } else {
             st.setPlayhead(before + Math.max(0, video.currentTime - cur.start));
           }
+          syncMusic(st.playhead, true);
           void loc;
         }
       }
@@ -136,9 +200,86 @@ export default function Preview() {
     setPlaying(!playing);
   };
 
+  // Active caption cue + text overlays at the current playhead.
+  const locNow = locateTime(clips, playhead);
+  const assetTime = locNow ? locNow.clip.start + locNow.offsetInClip : 0;
+  const activeCue: CaptionCue | undefined =
+    captionsEnabled && locNow
+      ? (captionsByAsset[locNow.clip.sourceId] || []).find(
+          (c) => assetTime >= c.start && assetTime < c.end && c.text.trim().length > 0
+        )
+      : undefined;
+  const activeOverlays = textOverlays.filter(
+    (o) => o.text.trim().length > 0 && playhead >= o.start && playhead < o.start + o.duration
+  );
+  const captionFontPx = Math.max(12, frameH * 0.052);
+
+  const captionBox = (() => {
+    if (!activeCue) return null;
+    const base: CSSProperties = {
+      fontFamily: CAPTION_FONT_STACK,
+      fontSize: captionFontPx,
+      lineHeight: 1.25,
+    };
+    if (captionStyle === "karaoke" && activeCue.words && activeCue.words.length > 0) {
+      return (
+        <div
+          data-testid="caption-overlay"
+          className="rounded-md bg-black/70 px-3 py-1 text-center font-bold text-white"
+          style={base}
+        >
+          {activeCue.words.map((w, i) => (
+            <span key={i} style={{ color: assetTime >= w.start ? "#d9a441" : "#ffffff" }}>
+              {w.word}
+              {i < (activeCue.words?.length || 0) - 1 ? " " : ""}
+            </span>
+          ))}
+        </div>
+      );
+    }
+    if (captionStyle === "yellow") {
+      return (
+        <div
+          data-testid="caption-overlay"
+          className="text-center font-bold text-[#ffe600]"
+          style={{
+            ...base,
+            textShadow:
+              "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 2px 6px rgba(0,0,0,.6)",
+          }}
+        >
+          {activeCue.text}
+        </div>
+      );
+    }
+    if (captionStyle === "minimal") {
+      return (
+        <div
+          data-testid="caption-overlay"
+          className="text-center text-white"
+          style={{ ...base, textShadow: "0 1px 8px rgba(0,0,0,.9), 0 0 2px rgba(0,0,0,.9)" }}
+        >
+          {activeCue.text}
+        </div>
+      );
+    }
+    return (
+      <div
+        data-testid="caption-overlay"
+        className="rounded-md bg-black/70 px-3 py-1 text-center font-bold text-white"
+        style={base}
+      >
+        {activeCue.text}
+      </div>
+    );
+  })();
+
   return (
     <div className="flex flex-col gap-2">
-      <div className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-lg border border-zinc-800 bg-black">
+      <div
+        ref={frameRef}
+        className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-lg border border-zinc-800 bg-black"
+      >
         <div className="aspect-video w-full">
           <video
             ref={videoRef}
@@ -153,6 +294,43 @@ export default function Preview() {
             {t.tagline}
           </div>
         )}
+        {/* Text overlays */}
+        {activeOverlays.map((o) => (
+          <div
+            key={o.id}
+            data-testid="text-overlay-preview"
+            className="pointer-events-none absolute inset-x-0 flex justify-center px-4"
+            style={
+              o.position === "top"
+                ? { top: "4%" }
+                : o.position === "bottom"
+                  ? { bottom: "13%" }
+                  : { top: "50%", transform: "translateY(-50%)" }
+            }
+          >
+            <div
+              className={`text-center ${o.pill ? "rounded-md bg-black/60 px-3 py-1" : ""}`}
+              style={{
+                fontFamily: CAPTION_FONT_STACK,
+                fontSize: Math.max(11, frameH * o.size),
+                fontWeight: o.bold ? 700 : 400,
+                color: o.color,
+                lineHeight: 1.25,
+                textShadow: o.pill ? undefined : "0 1px 6px rgba(0,0,0,.85)",
+              }}
+            >
+              {o.text}
+            </div>
+          </div>
+        ))}
+        {/* Caption line */}
+        {captionBox && (
+          <div className="pointer-events-none absolute inset-x-0 flex justify-center px-4" style={{ bottom: "4.5%" }}>
+            {captionBox}
+          </div>
+        )}
+        {/* Music element (preview only; export mixes with ffmpeg) */}
+        <audio ref={audioRef} src={music?.url} preload="auto" className="hidden" />
       </div>
       <div className="mx-auto flex w-full max-w-3xl items-center gap-3">
         <button

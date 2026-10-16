@@ -16,6 +16,13 @@ const jobs = [
   ["node_modules/@ffmpeg/ffmpeg/dist/esm/worker.js", "public/ffmpeg-worker/worker.js"],
   ["node_modules/@ffmpeg/ffmpeg/dist/esm/const.js", "public/ffmpeg-worker/const.js"],
   ["node_modules/@ffmpeg/ffmpeg/dist/esm/errors.js", "public/ffmpeg-worker/errors.js"],
+  // ONNX Runtime Web binaries for the Whisper worker (@huggingface/transformers).
+  // Self-hosted so model inference never depends on a CDN at runtime; the
+  // worker points env.backends.onnx.wasm.wasmPaths at <origin>/ort/.
+  ["node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm", "public/ort/ort-wasm-simd-threaded.wasm"],
+  ["node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs", "public/ort/ort-wasm-simd-threaded.mjs"],
+  ["node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm", "public/ort/ort-wasm-simd-threaded.jsep.wasm"],
+  ["node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.mjs", "public/ort/ort-wasm-simd-threaded.jsep.mjs"],
 ];
 
 for (const [src, dst] of jobs) {

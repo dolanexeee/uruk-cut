@@ -1,5 +1,19 @@
 @import "tailwindcss";
 
+/* Bundled caption/overlay fonts (also fed to libass at export via fontsdir). */
+@font-face {
+  font-family: "Noto Sans Arabic";
+  src: url("/fonts/NotoSansArabic.ttf") format("truetype");
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/Inter.ttf") format("truetype");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 html,
 body {
   background: #0e0e11;

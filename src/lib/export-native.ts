@@ -1,5 +1,17 @@
-import { clipDuration, type Clip, type SourceAsset } from "../store/editor";
+import {
+  clipDuration,
+  totalDuration,
+  type Clip,
+  type SourceAsset,
+} from "../store/editor";
 import type { ExportCallbacks } from "./export";
+import {
+  buildFinalPassArgs,
+  needsFinalPass,
+  type ExportExtras,
+} from "./finalpass";
+
+const FONT_FILES = ["NotoSansArabic.ttf", "Inter.ttf"];
 
 /**
  * Desktop (Tauri) export path — the same render pipeline as the web/WASM
@@ -28,6 +40,7 @@ interface FFmpegRunResult {
 export async function exportVideoNative(
   clips: Clip[],
   assets: SourceAsset[],
+  extras: ExportExtras,
   cb: ExportCallbacks
 ): Promise<Blob> {
   if (clips.length === 0) throw new Error("No clips to export");
@@ -61,19 +74,27 @@ export async function exportVideoNative(
   await fs.mkdir(work, { recursive: true });
 
   // Progress plumbing: the Rust command emits `ffmpeg-progress` events with
-  // the `time=` position (seconds) of the currently running encode. While a
-  // segment encode runs we map it onto that segment's share of the bar —
-  // identical staging math to the WASM path.
+  // the `time=` position (seconds) of the currently running encode. The
+  // listener maps it through the active window (base + scale * time/dur) —
+  // segments and the Phase-2 finishing pass each install their own window,
+  // with staging math identical to the WASM path.
   const total = clips.length;
+  const withPass = needsFinalPass(extras);
+  const denom = total + 0.25 + (withPass ? 1 : 0);
   let active = false;
+  let stage: "segment" | "finishing" = "segment";
   let segIndex = 0;
-  let segDur = 0;
+  let progBase = 0;
+  let progScale = 0;
+  let progDur = 0;
   const unlisten = await listen<{ time: number }>("ffmpeg-progress", (e) => {
-    if (!active || segDur <= 0) return;
-    const p = Math.min(1, Math.max(0, (e.payload.time || 0) / segDur));
+    if (!active || progDur <= 0) return;
+    const p = Math.min(1, Math.max(0, (e.payload.time || 0) / progDur));
     cb.onStage(
-      { type: "segment", index: segIndex, total },
-      ((segIndex + p) / (total + 0.25)) * 0.98
+      stage === "segment"
+        ? { type: "segment", index: segIndex, total }
+        : { type: "finishing" },
+      progBase + p * progScale
     );
   });
 
@@ -87,7 +108,7 @@ export async function exportVideoNative(
       const segPath = await pathApi.join(work, `seg${i}.mp4`);
       segPaths.push(segPath);
 
-      cb.onStage({ type: "segment", index: i, total }, (i / (total + 0.25)) * 0.98);
+      cb.onStage({ type: "segment", index: i, total }, (i / denom) * 0.98);
       await fs.writeFile(inPath, new Uint8Array(await asset.file.arrayBuffer()));
 
       // Detect an audio stream from the `ffmpeg -i` banner (same test as web).
@@ -120,7 +141,10 @@ export async function exportVideoNative(
           ];
 
       segIndex = i;
-      segDur = dur;
+      stage = "segment";
+      progBase = (i / denom) * 0.98;
+      progScale = (1 / denom) * 0.98;
+      progDur = dur;
       active = true;
       const res = await run(args);
       active = false;
@@ -131,16 +155,70 @@ export async function exportVideoNative(
       }
     }
 
-    cb.onStage({ type: "joining" }, 0.97);
+    cb.onStage({ type: "joining" }, (total / denom) * 0.98);
     const listPath = await pathApi.join(work, "list.txt");
     const list = segPaths.map((s) => `file '${s.replace(/'/g, "'\\''")}'`).join("\n");
     await fs.writeFile(listPath, new TextEncoder().encode(list));
+    const basePath = await pathApi.join(work, "base.mp4");
     const outPath = await pathApi.join(work, "uruk-cut-export.mp4");
-    const join = await run(["-y", "-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", outPath]);
+    const join = await run(["-y", "-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", basePath]);
     if (join.code !== 0) {
       throw new Error(`Joining segments failed (exit ${join.code}): ${join.output.slice(-400)}`);
     }
-    const data = await fs.readFile(outPath);
+
+    let finalPath = basePath;
+    if (withPass) {
+      // Phase 2 final pass: caption/text burn-in + music mix (lib/finalpass.ts).
+      cb.onStage({ type: "finishing" }, ((total + 0.25) / denom) * 0.98);
+      let assPath: string | null = null;
+      let fontsDir: string | null = null;
+      let musicPath: string | null = null;
+      if (extras.assContent) {
+        assPath = await pathApi.join(work, "captions.ass");
+        await fs.writeFile(assPath, new TextEncoder().encode(extras.assContent));
+        // Feed libass the bundled fonts; if the webview cannot fetch its own
+        // assets, fall back to system fonts (fontsDir stays null).
+        try {
+          const dir = await pathApi.join(work, "fonts");
+          await fs.mkdir(dir, { recursive: true });
+          for (const name of FONT_FILES) {
+            const res = await fetch(`${window.location.origin}/fonts/${name}`);
+            if (!res.ok) throw new Error(`font HTTP ${res.status}`);
+            await fs.writeFile(
+              await pathApi.join(dir, name),
+              new Uint8Array(await res.arrayBuffer())
+            );
+          }
+          fontsDir = dir;
+        } catch {
+          fontsDir = null;
+        }
+      }
+      if (extras.music) {
+        musicPath = await pathApi.join(work, `music.${extOf(extras.music.file.name)}`);
+        await fs.writeFile(musicPath, new Uint8Array(await extras.music.file.arrayBuffer()));
+      }
+      const args = buildFinalPassArgs(extras, {
+        base: basePath,
+        out: outPath,
+        ass: assPath,
+        fontsDir,
+        music: musicPath,
+      });
+      stage = "finishing";
+      progBase = ((total + 0.25) / denom) * 0.98;
+      progScale = (1 / denom) * 0.98;
+      progDur = Math.max(0.1, totalDuration(clips));
+      active = true;
+      const pass = await run(["-y", ...args]);
+      active = false;
+      if (pass.code !== 0) {
+        throw new Error(`Finishing pass failed (exit ${pass.code}): ${pass.output.slice(-400)}`);
+      }
+      finalPath = outPath;
+    }
+
+    const data = await fs.readFile(finalPath);
     const blob = new Blob([data as BlobPart], { type: "video/mp4" });
     cb.onStage({ type: "done" }, 1);
     return blob;

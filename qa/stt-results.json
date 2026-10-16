@@ -1,0 +1,49 @@
+{
+  "model": "Xenova/whisper-small",
+  "runs": {
+    "en": {
+      "cues": [
+        {
+          "start": 0,
+          "end": 2.56,
+          "text": "Welcome to Yorah Upcut. This is a",
+          "words": 7
+        },
+        {
+          "start": 2.56,
+          "end": 3.34,
+          "text": "caption test.",
+          "words": 2
+        }
+      ],
+      "transcript": "Welcome to Yorah Upcut. This is a caption test.",
+      "stats": {
+        "ordered": true,
+        "valid": true,
+        "coverage": 0.5566666666666666
+      }
+    },
+    "ar": {
+      "cues": [
+        {
+          "start": 0,
+          "end": 3.56,
+          "text": "مرحبا بكم في OroCAD هذا اختبار",
+          "words": 6
+        },
+        {
+          "start": 3.56,
+          "end": 5.28,
+          "text": "للترجمة تلقائية",
+          "words": 2
+        }
+      ],
+      "transcript": "مرحبا بكم في OroCAD هذا اختبار للترجمة تلقائية",
+      "stats": {
+        "ordered": true,
+        "valid": true,
+        "coverage": 0.88
+      }
+    }
+  }
+}

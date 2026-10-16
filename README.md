@@ -48,6 +48,47 @@ leaves your device.
 - **Arabic / English UI** — one-click toggle; Arabic switches the whole
   layout to RTL.
 
+## Phase-2 features
+
+- **Auto-captions (on-device Whisper)** — captions are generated locally in
+  a Web Worker with [Whisper](https://huggingface.co/Xenova) via
+  `@huggingface/transformers` (ONNX Runtime Web). Model picker: **tiny**
+  (~40 MB), **base** (~150 MB), **small** (~500 MB, default). The model
+  downloads once from Hugging Face on first use and is cached by the
+  browser afterwards; after that, transcription works fully offline and
+  **no audio ever leaves the device**. Language: auto-detect, Arabic, or
+  English. Audio is extracted per source video (16 kHz mono WAV via the
+  bundled FFmpeg), transcribed once per source with **word-level
+  timestamps**, and the words are grouped into cues (≤ ~4 s, ≤ 2 short
+  lines). Timeline clips show the slice of their source's cues inside
+  their trim. The captions panel lists every cue with editable text and
+  start/end fields; cues can be added or deleted by hand, and clicking a
+  cue seeks the preview. Generation shows real progress and can be
+  cancelled. Manual captioning works even without ever running Whisper.
+- **Caption styles** — Classic (white bold on a black pill), Yellow Pop
+  (yellow bold, dark outline), Minimal (white, soft shadow), and Karaoke
+  (the active word highlights in Uruk bronze `#d9a441` as it is spoken,
+  using the word timings).
+- **Text overlays** — add text items with start/duration, position
+  (top/center/bottom), size, color, bold, and an optional background pill.
+  They render in the preview and are burned into exports.
+- **Music track** — import an audio file (MP3/WAV/M4A/OGG) onto its own
+  timeline row: waveform block with trim handles, drag to offset, volume,
+  and 0–2 s fade-in/fade-out. A project toggle keeps or mutes the original
+  clip audio. The preview plays the music in sync (fades approximated by
+  volume ramps); exports mix it precisely with FFmpeg `afade` + `amix`.
+
+**Caption burn-in method (per platform).** Both FFmpeg builds were probed
+for filters (`qa/filter-probe.json`): the WASM core (`@ffmpeg/core`) and
+the native sidecar both ship libass (`subtitles`/`ass`). So on **both**
+platforms the exporter generates an `.ass` file — caption styles, `\k`
+karaoke tags when word timings exist, text overlays as styled events —
+and burns it with the `subtitles` filter in a final pass, with `fontsdir`
+pointed at the bundled fonts (`public/fonts/`: Noto Sans Arabic +
+Inter). libass shapes Arabic (bidi + letter joining) correctly, which a
+`drawtext` chain cannot do reliably; that is why ASS is the primary path
+rather than a fallback.
+
 ## Desktop app (Phase 1.5)
 
 The desktop app is a [Tauri v2](https://tauri.app/) shell (`src-tauri/`)
@@ -116,8 +157,19 @@ yet been executed in CI — the first tagged release is its real test.
 - **Large files are constrained by device memory.** Sources and segments are
   held in the browser/WASM memory space; very long or 4K sources may fail on
   low-memory phones. Short-form clips (the app's target) work best.
-- One video track only; no captions, text overlays, music library, filters,
-  or transitions yet — those are planned for later phases.
+- One video track only; no filters or transitions yet — those are planned
+  for later phases. (Captions, text overlays, and a music track arrived in
+  Phase 2 — see above.)
+- **Whisper runs on the CPU (WASM)** in the browser build, single-threaded
+  when the page is not cross-origin-isolated: transcription of a short
+  clip takes noticeably longer than the clip itself, and the first run
+  downloads the chosen model. Long recordings are therefore slow; the app
+  targets short-form clips. Desktop uses the same in-webview Whisper
+  (export is native there; transcription is not).
+- Karaoke highlighting needs word timings: cues typed or edited by hand
+  (editing a cue clears its word timings) render as whole-cue highlights
+  instead. If the caption style is Karaoke but a cue has no word timings,
+  the whole cue is shown in the base style.
 - Browser codec support varies: Safari cannot play some WebM files, Firefox
   may need system codecs for some MP4s. Export relies on FFmpeg (WASM), not
   on the browser's own codecs.
@@ -170,6 +222,18 @@ deployment. Phase 1.5 additionally verified the desktop app by installing
 the built `.deb` and driving it under Xvfb (import via the native file
 chooser, native-sidecar export to 100%) — see `qa/screenshot-desktop-*.png`.
 
+Phase 2 adds: `qa/probe-filters.mjs` (filter evidence for both FFmpeg
+builds → `qa/filter-probe.json`), `qa/make-fixtures-phase2.sh` (speech +
+music fixtures: English voice synthesized locally with FFmpeg's libflite;
+Arabic voice via the Google Translate TTS endpoint — Edge TTS's WSS
+endpoint is blocked by the QA sandbox's egress proxy),
+`qa/stt-test.mjs` (drives the real captions panel in a browser: Whisper
+small on the English + Arabic fixtures; verbatim transcripts in
+`qa/stt-results.json`), `qa/export-phase2.mjs` (full WASM-pipeline export
+with captions/text/music + pixel-diff burn proof), and
+`qa/native-plan-test.mjs` (executes the app's shared final-pass command
+builder verbatim through the native sidecar, with the same probes).
+
 ## Project status
 
 - **Phase 1 (done):** browser editor — import, timeline, trim/split/reorder,
@@ -177,7 +241,11 @@ chooser, native-sidecar export to 100%) — see `qa/screenshot-desktop-*.png`.
 - **Phase 1.5 (done):** Tauri desktop app with native-FFmpeg export
   (Linux installers built + verified locally), open-source GitHub release
   (this repo), tag-triggered cross-platform release workflow (CI-untested).
-- Later phases: captions/text/music, more tracks and effects.
+- **Phase 2 (done):** on-device Whisper auto-captions (Arabic + English,
+  word timings, karaoke), caption styles, text overlays, music track with
+  fades — all rendered in preview and burned/mixed into exports on both
+  the WASM and native pipelines (ASS via libass; see Phase-2 section).
+- Later phases: more tracks and effects.
 
 ## License
 
