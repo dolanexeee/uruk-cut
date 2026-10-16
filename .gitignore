@@ -1,0 +1,25 @@
+# dependencies & build output
+node_modules
+.next
+out
+dist
+.vercel
+*.log
+.DS_Store
+
+# FFmpeg WASM core + class worker: generated at build time by
+# scripts/copy-ffmpeg.mjs from the @ffmpeg/* npm packages (never committed)
+public/ffmpeg/
+public/ffmpeg-worker/
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/
+
+# FFmpeg sidecar binaries (~80 MB per OS): fetched by
+# scripts/fetch-sidecar.sh — locally and in the release workflow
+src-tauri/binaries/
+
+# QA outputs (fixtures in qa/fixtures/ ARE committed; they are small)
+qa/*.mp4
+qa/screenshots

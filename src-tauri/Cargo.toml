@@ -1,0 +1,20 @@
+[package]
+name = "uruk-cut"
+version = "0.1.0"
+description = "Uruk Cut — clean-room, open-source short-form video editor (desktop shell)"
+authors = ["URUK contributors"]
+edition = "2021"
+
+[lib]
+name = "uruk_cut_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

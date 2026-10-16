@@ -1,0 +1,95 @@
+name: Release Desktop
+
+# Builds Uruk Cut desktop installers (Tauri) for Linux, Windows and macOS
+# and attaches them to the GitHub Release for v* tags. Also runnable
+# manually (workflow_dispatch) — then installers land as run artifacts.
+#
+# NOTE: this workflow is syntactically validated but has not yet been
+# executed in CI; the first tagged release will be its real test.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.triple }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            triple: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            triple: x86_64-pc-windows-msvc
+          - os: macos-13
+            triple: x86_64-apple-darwin
+          - os: macos-14
+            triple: aarch64-apple-darwin
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux system dependencies (Tauri v2)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Fetch FFmpeg sidecar for ${{ matrix.triple }}
+        shell: bash
+        run: bash scripts/fetch-sidecar.sh "${{ matrix.triple }}"
+
+      - name: Build Tauri app
+        run: npm run tauri build -- --target ${{ matrix.triple }}
+
+      - name: Upload installers as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: uruk-cut-${{ matrix.triple }}
+          if-no-files-found: warn
+          path: |
+            src-tauri/target/${{ matrix.triple }}/release/bundle/**/*.deb
+            src-tauri/target/${{ matrix.triple }}/release/bundle/**/*.AppImage
+            src-tauri/target/${{ matrix.triple }}/release/bundle/**/*.msi
+            src-tauri/target/${{ matrix.triple }}/release/bundle/**/*.exe
+            src-tauri/target/${{ matrix.triple }}/release/bundle/**/*.dmg
+
+      - name: Attach installers to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            src-tauri/target/${{ matrix.triple }}/release/bundle/**/*.deb
+            src-tauri/target/${{ matrix.triple }}/release/bundle/**/*.AppImage
+            src-tauri/target/${{ matrix.triple }}/release/bundle/**/*.msi
+            src-tauri/target/${{ matrix.triple }}/release/bundle/**/*.exe
+            src-tauri/target/${{ matrix.triple }}/release/bundle/**/*.dmg

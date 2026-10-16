@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+html,
+body {
+  background: #0e0e11;
+  color: #f4f4f5;
+  overscroll-behavior-y: none;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #121215;
+}
+::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 6px;
+  border: 2px solid #121215;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #d9a441;
+}
+
+input[type="range"] {
+  cursor: pointer;
+}
