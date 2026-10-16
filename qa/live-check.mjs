@@ -25,6 +25,11 @@ page.on("pageerror", (e) => console.log("pageerror:", e.message.slice(0, 200)));
 
 await page.goto(`${BASE}/?test=1`, { waitUntil: "domcontentloaded", timeout: 90000 });
 await page.waitForSelector("text=URUK", { timeout: 60000 });
+// Wait for hydration: the static-export page paints its HTML before the JS
+// bundles arrive (especially over a slow proxy), and setInputFiles before
+// React attaches the change handler silently loses the file. The ?test=1
+// store hook only exists once the app has hydrated.
+await page.waitForFunction(() => typeof window.__urukStore === "function", null, { timeout: 60000 });
 console.log("title ok:", (await page.locator("text=URUK").first().isVisible()) ? "URUK visible" : "MISSING");
 
 await page.setInputFiles('[data-testid="file-input"]', [path.join(root, "fixtures", "no-audio.mp4")]);
