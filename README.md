@@ -11,6 +11,17 @@ server-side rendering, no account. It is the first application in the
   bundled **native FFmpeg** binary instead of WebAssembly — see
   [Desktop app](#desktop-app-phase-15).
 
+## Deployment (web)
+
+Production: <https://uruk-cut.vercel.app>. Redeploy with the Vercel CLI from a
+**git-free copy** of the source (plus `.vercel/project.json`): deployments
+created from inside the git checkout were server-side BLOCKED (their git
+metadata doesn't match how this project was first deployed), while the
+git-free upload — 41.8 KB thanks to `.vercelignore` — builds and aliases
+cleanly. Vercel runs `npm run build` remotely, which regenerates the ffmpeg
+core, ONNX Runtime files and worker from npm packages; only `public/fonts/`
+ships from the repo.
+
 ## Clean-Room Statement
 
 Uruk Cut is a clean-room implementation. It was designed and written from

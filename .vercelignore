@@ -1,0 +1,15 @@
+# Vercel CLI uploads: keep the deployment source-only. Everything heavy or
+# generated is rebuilt remotely (npm run build regenerates public/ffmpeg,
+# public/ffmpeg-worker and public/ort via scripts/copy-ffmpeg.mjs).
+node_modules
+.next
+out
+.vercel
+src-tauri/target
+src-tauri/binaries
+src-tauri/gen
+public/ffmpeg
+public/ffmpeg-worker
+public/ort
+qa
+*.log
