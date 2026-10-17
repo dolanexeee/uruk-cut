@@ -1,4 +1,4 @@
-import type { CaptionStyleId, TextOverlay } from "../store/editor";
+import { overlayAnimation, type CaptionStyleId, type TextOverlay } from "../store/editor";
 import type { TimelineCue } from "./captions";
 
 /**
@@ -168,6 +168,55 @@ function karaokeText(cue: TimelineCue): string {
   return parts.join(" ");
 }
 
+/**
+ * Phase 4: animation override tags for a text overlay event.
+ *
+ * ASS has one mechanism per property: \fad (alpha in/out), \move (a single
+ * position glide over a time window), and \t (transform of scale/alpha
+ * between two timestamps). Each preset therefore maps to:
+ *   fade     -> \fad(in, out)
+ *   slide-up -> \move from below the resting spot into place (in), then
+ *               \fad(0, out) for the exit (a second positional glide is not
+ *               expressible in one Dialogue event)
+ *   pop      -> \t scale 60% -> 108% (first half of the entrance) -> 100%,
+ *               exit scales back to 60% with a fade
+ * Windows are ~0.35 s per side, clamped to half the item duration so very
+ * short items still animate symmetrically. Positions for \move are
+ * absolute PlayRes coordinates of the alignment anchor, mirroring
+ * overlayStyle()'s alignment + margins.
+ */
+export function overlayAnimTags(ov: TextOverlay, W: number, H: number): string {
+  const anim = overlayAnimation(ov);
+  if (anim === "none" || ov.duration <= 0.05) return "";
+  const half = ov.duration / 2;
+  const inS = Math.min(0.35, half);
+  const outS = Math.min(0.35, half);
+  const inMs = Math.round(inS * 1000);
+  const outMs = Math.round(outS * 1000);
+  const outStartMs = Math.round((ov.duration - outS) * 1000);
+  const durMs = Math.round(ov.duration * 1000);
+  if (anim === "fade") return `{\\fad(${inMs},${outMs})}`;
+  if (anim === "slide-up") {
+    const x = Math.round(W / 2);
+    const y =
+      ov.position === "top"
+        ? Math.round(H * 0.04)
+        : ov.position === "center"
+          ? Math.round(H / 2)
+          : Math.round(H - H * 0.13);
+    const dist = Math.max(24, Math.round(H * 0.07));
+    return `{\\move(${x},${y + dist},${x},${y},0,${inMs})\\fad(0,${outMs})}`;
+  }
+  // pop
+  const midMs = Math.max(1, Math.round(inMs / 2));
+  return (
+    `{\\fscx60\\fscy60` +
+    `\\t(0,${midMs},\\fscx108\\fscy108)` +
+    `\\t(${midMs},${inMs},\\fscx100\\fscy100)` +
+    `\\t(${outStartMs},${durMs},\\fscx60\\fscy60)\\fad(0,${outMs})}`
+  );
+}
+
 export interface AssBuildInput {
   width: number;
   height: number;
@@ -195,8 +244,9 @@ export function buildAss(input: AssBuildInput): string | null {
     );
   }
   styledOverlays.forEach((ov, i) => {
+    const tags = overlayAnimTags(ov, W, H);
     events.push(
-      `Dialogue: 1,${assTime(ov.start)},${assTime(ov.start + ov.duration)},Ov${i},,0,0,0,,${esc(ov.text)}`
+      `Dialogue: 1,${assTime(ov.start)},${assTime(ov.start + ov.duration)},Ov${i},,0,0,0,,${tags}${esc(ov.text)}`
     );
   });
 

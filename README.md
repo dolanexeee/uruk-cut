@@ -133,6 +133,38 @@ Inter). libass shapes Arabic (bidi + letter joining) correctly, which a
 `drawtext` chain cannot do reliably; that is why ASS is the primary path
 rather than a fallback.
 
+## Phase-4 features
+
+- **Per-clip volume** — every clip has a gain slider (0–150%) and a mute
+  toggle in the Adjust tab. The preview's `<video>` volume follows the
+  active clip (× the project keep-original-audio toggle); exports apply a
+  `volume` filter per segment inside the shared render plan, after the
+  speed `atempo` chain. A muted (or 0%) clip still renders a silent audio
+  track, so joins stay uniform. Measured with `volumedetect`
+  (`qa/phase4-plan-test.mjs`): 50% volume = exactly −6.0 dB vs 100%,
+  0%/muted = digital silence (−91 dB mean).
+- **Animated text** — text overlays have an animation preset: **None /
+  Fade / Slide-up / Pop**, with ~0.35 s entrance and exit windows (each
+  clamped to half the item's duration). The preview approximates the same
+  phase math with CSS; exports are exact — the ASS generator emits libass
+  override tags (`\fad` for fade, `\move` + exit fade for slide-up,
+  `\t` scale keyframes for pop). Both FFmpeg builds ship libass, so no
+  platform degrades to a lesser method. Slide-up's exit is a fade: a
+  second positional glide is not expressible in a single ASS event.
+  Measured: mid-animation vs settled frame differs on 10.5% of pixels in
+  the text band (`qa/phase4-plan-test.mjs`).
+- **Save / load project (.urukcut)** — the header's Save button downloads
+  a single `.urukcut` file: a ZIP containing `project.json` (assets,
+  clips with trim/speed/look/volume, per-asset caption cues incl. word
+  timings, text overlays, the music track and project settings) plus the
+  media files themselves. Open restores a fully working project (media
+  re-probed, filmstrips regenerated). The same bundle is **auto-saved to
+  IndexedDB** (debounced) on every edit and restored automatically on
+  app start — look for the "project restored" note; **New** (with a
+  confirm) clears it. Storage failures (e.g. quota) surface as a
+  non-fatal warning banner; Save still works. Everything stays on the
+  device — there is no server copy of your project.
+
 ## Desktop app (Phase 1.5)
 
 The desktop app is a [Tauri v2](https://tauri.app/) shell (`src-tauri/`)
@@ -291,6 +323,15 @@ sidecar: look pixel-diffs, crossfade/dip-to-black duration proofs, speed
 segment proofs, canvas-size probes → `qa/export-phase3-results.json`) and
 `qa/phase3-ui.mjs` (drives the real UI: Adjust tab, speed + transition +
 canvas controls, and a WASM export through the xfade join).
+
+Phase 4 adds: `qa/phase4-plan-test.mjs` (per-clip volume measured with
+`volumedetect` through the shared render plan; animated-text ASS tags +
+slide-up frame pixel-diffs → `qa/export-phase4-results.json`),
+`qa/phase4-project-test.mjs` (Playwright: builds a project, asserts the
+IndexedDB autosave lands, downloads + inspects the `.urukcut`, reloads to
+prove auto-restore, clears with New, and re-opens the file — 21 checks),
+and `qa/phase4-screenshots.mjs` (header project buttons, volume slider,
+mid-animation preview frame).
 
 ## Project status
 

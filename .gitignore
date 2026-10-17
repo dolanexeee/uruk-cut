@@ -28,3 +28,4 @@ src-tauri/binaries/
 # QA outputs (fixtures in qa/fixtures/ ARE committed; they are small)
 qa/*.mp4
 qa/screenshots
+tsconfig.tsbuildinfo

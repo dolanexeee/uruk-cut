@@ -1,6 +1,8 @@
 import {
   clipDuration,
+  clipMuted,
   clipSpeed,
+  clipVolume,
   transitionOverlap,
   type Clip,
   type ProjectSettings,
@@ -47,24 +49,36 @@ export function segmentVideoFilter(clip: Clip, width: number, height: number): s
   return parts.join(",");
 }
 
-/** Audio filter for one segment (atempo chain), null at 1× speed. */
+/**
+ * Audio filter chain for one segment: the Phase-3 atempo chain (speed)
+ * followed by the Phase-4 per-clip gain. A muted clip — or a volume of 0 —
+ * renders as digital silence (`volume=0`) so the segment still carries a
+ * well-formed audio track and the join logic stays uniform. Returns null
+ * only when nothing needs doing (1× speed, volume 1, not muted).
+ */
 export function segmentAudioFilter(clip: Clip): string | null {
-  const speed = clipSpeed(clip);
-  if (speed === 1) return null;
-  // atempo accepts 0.5..100 per instance in current FFmpeg; our speed
-  // range is 0.5..2, but chain defensively for any value.
   const chain: string[] = [];
-  let s = speed;
-  while (s > 2) {
-    chain.push("atempo=2");
-    s /= 2;
+  const speed = clipSpeed(clip);
+  if (speed !== 1) {
+    // atempo accepts 0.5..100 per instance in current FFmpeg; our speed
+    // range is 0.5..2, but chain defensively for any value.
+    let s = speed;
+    while (s > 2) {
+      chain.push("atempo=2");
+      s /= 2;
+    }
+    while (s < 0.5) {
+      chain.push("atempo=0.5");
+      s *= 2;
+    }
+    chain.push(`atempo=${f3(s)}`);
   }
-  while (s < 0.5) {
-    chain.push("atempo=0.5");
-    s *= 2;
+  if (clipMuted(clip) || clipVolume(clip) === 0) {
+    chain.push("volume=0");
+  } else if (clipVolume(clip) !== 1) {
+    chain.push(`volume=${f3(clipVolume(clip))}`);
   }
-  chain.push(`atempo=${f3(s)}`);
-  return chain.join(",");
+  return chain.length > 0 ? chain.join(",") : null;
 }
 
 /** Expected duration of the joined sequence (== the store's totalDuration). */

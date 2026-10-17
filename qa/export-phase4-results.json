@@ -1,0 +1,22 @@
+{
+  "plan": {
+    "meanVolumeDb": {
+      "fixture": -21.1,
+      "pipelineBaseline": -24.1,
+      "vol100": -24.1,
+      "vol50": -30.1,
+      "vol0": -91,
+      "muted": -91
+    },
+    "animDiffs": {
+      "motion": {
+        "meanAbsDiff": 20.1453625,
+        "pctPixelsChanged": 10.52
+      },
+      "present": {
+        "meanAbsDiff": 17.3050875,
+        "pctPixelsChanged": 7.75875
+      }
+    }
+  }
+}

@@ -57,6 +57,8 @@ export interface Clip {
   speed: number; // playback rate (0.5..2); timeline duration = (end-start)/speed
   adjust: ClipAdjust;
   presetId: LookPresetId; // a named look, or "custom" = use `adjust`
+  volume: number; // Phase 4: per-clip gain 0..1.5 (1 = original level)
+  muted: boolean; // Phase 4: per-clip mute (segment renders silent)
 }
 
 /** Defensive accessors: clips built by older code / QA literals may lack fields. */
@@ -64,6 +66,11 @@ export const clipSpeed = (c: Clip): number =>
   typeof c.speed === "number" && isFinite(c.speed) && c.speed > 0 ? c.speed : 1;
 export const clipAdjust = (c: Clip): ClipAdjust => c.adjust ?? DEFAULT_ADJUST;
 export const clipPreset = (c: Clip): LookPresetId => c.presetId ?? "original";
+export const clipVolume = (c: Clip): number =>
+  typeof c.volume === "number" && isFinite(c.volume)
+    ? Math.min(1.5, Math.max(0, c.volume))
+    : 1;
+export const clipMuted = (c: Clip): boolean => c.muted === true;
 
 export const clipDuration = (c: Clip) =>
   Math.max(0, (c.end - c.start) / clipSpeed(c));
@@ -172,6 +179,8 @@ export interface CaptionJob {
   detail: string;
 }
 
+export type TextAnimation = "none" | "fade" | "slide-up" | "pop";
+
 export interface TextOverlay {
   id: string;
   text: string;
@@ -182,7 +191,14 @@ export interface TextOverlay {
   color: string; // #rrggbb
   bold: boolean;
   pill: boolean;
+  animation: TextAnimation; // Phase 4: entrance/exit animation preset
 }
+
+/** Defensive accessor: overlays saved by older code may lack the field. */
+export const overlayAnimation = (o: TextOverlay): TextAnimation =>
+  o.animation === "fade" || o.animation === "slide-up" || o.animation === "pop"
+    ? o.animation
+    : "none";
 
 export interface MusicTrack {
   id: string;
@@ -281,6 +297,12 @@ interface EditorState {
   /* Phase 3 state */
   project: ProjectSettings;
   setProject: (patch: Partial<ProjectSettings>) => void;
+
+  /* Phase 4 state: project-file / autosave notices */
+  restoredNotice: boolean;
+  storageWarning: string | null;
+  setRestoredNotice: (b: boolean) => void;
+  setStorageWarning: (msg: string | null) => void;
 }
 
 const snapshot = (clips: Clip[]): Clip[] => clips.map((c) => ({ ...c }));
@@ -320,6 +342,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       speed: 1,
       adjust: { ...DEFAULT_ADJUST },
       presetId: "original",
+      volume: 1,
+      muted: false,
     };
     set((s) => ({
       assets: [...s.assets, asset],
@@ -502,6 +526,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         color: "#ffffff",
         bold: true,
         pill: true,
+        animation: "none",
       };
       return { textOverlays: [...s.textOverlays, ov], selectedTextId: ov.id };
     }),
@@ -530,4 +555,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         playhead: Math.min(s.playhead, totalDuration(s.clips, project)),
       };
     }),
+
+  restoredNotice: false,
+  storageWarning: null,
+  setRestoredNotice: (b) => set({ restoredNotice: b }),
+  setStorageWarning: (msg) => set({ storageWarning: msg }),
 }));

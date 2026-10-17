@@ -3,8 +3,10 @@
 import { useRef } from "react";
 import {
   clipAdjust,
+  clipMuted,
   clipPreset,
   clipSpeed,
+  clipVolume,
   DEFAULT_ADJUST,
   useEditorStore,
   type ClipAdjust,
@@ -166,6 +168,52 @@ export default function AdjustPanel() {
               {v}×
             </button>
           ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-2 text-xs font-medium tracking-wide text-zinc-400">{t.clipVolume}</div>
+        <div className="flex items-center gap-3">
+          <label className="flex flex-1 items-center gap-3 text-sm text-zinc-300">
+            <input
+              type="range"
+              min={0}
+              max={1.5}
+              step={0.01}
+              value={clipVolume(clip)}
+              data-testid="slider-volume"
+              dir="ltr"
+              className="min-w-0 flex-1 accent-[#d9a441]"
+              onPointerDown={() => {
+                if (!historyPushed.current) {
+                  historyPushed.current = true;
+                  st.pushHistory();
+                }
+              }}
+              onPointerUp={() => {
+                historyPushed.current = false;
+              }}
+              onChange={(e) =>
+                st.updateClip(clip.id, { volume: Number(e.target.value) })
+              }
+            />
+            <span className="w-12 shrink-0 text-end font-mono text-xs text-zinc-400" dir="ltr">
+              {Math.round(clipVolume(clip) * 100)}%
+            </span>
+          </label>
+          <label className="flex cursor-pointer items-center gap-1.5 text-sm text-zinc-300">
+            <input
+              type="checkbox"
+              checked={clipMuted(clip)}
+              data-testid="clip-muted"
+              onChange={(e) => {
+                st.pushHistory();
+                st.updateClip(clip.id, { muted: e.target.checked });
+              }}
+              className="h-4 w-4 accent-[#d9a441]"
+            />
+            {t.clipMuted}
+          </label>
         </div>
       </div>
     </div>

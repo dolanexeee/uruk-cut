@@ -1,6 +1,11 @@
 "use client";
 
-import { useEditorStore, type TextOverlay } from "../store/editor";
+import {
+  overlayAnimation,
+  useEditorStore,
+  type TextAnimation,
+  type TextOverlay,
+} from "../store/editor";
 import { dict } from "../i18n";
 
 const inputCls =
@@ -93,6 +98,23 @@ export default function TextPanel() {
                     {posLabel(p)}
                   </option>
                 ))}
+              </select>
+              <select
+                className={inputCls}
+                value={overlayAnimation(ov)}
+                data-testid="text-anim"
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) =>
+                  useEditorStore
+                    .getState()
+                    .updateTextOverlay(ov.id, { animation: e.target.value as TextAnimation })
+                }
+                aria-label={t.animLabel}
+              >
+                <option value="none">{t.animNone}</option>
+                <option value="fade">{t.animFade}</option>
+                <option value="slide-up">{t.animSlideUp}</option>
+                <option value="pop">{t.animPop}</option>
               </select>
               <label className="flex items-center gap-1 text-xs text-zinc-400">
                 {t.textSize}

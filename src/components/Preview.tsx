@@ -3,14 +3,18 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   clipDuration,
+  clipMuted,
   clipSpeed,
   clipStartOffsets,
+  clipVolume,
   locateTime,
   musicDuration,
+  overlayAnimation,
   totalDuration,
   transitionOverlap,
   useEditorStore,
   type CaptionCue,
+  type TextOverlay,
 } from "../store/editor";
 import { outputCanvas } from "../lib/captions";
 import { clipLookCss } from "../lib/looks";
@@ -48,6 +52,17 @@ export default function Preview() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
+
+  /** Phase 4: the <video> element's volume follows the active clip's
+   *  per-clip gain × mute × the project keep-original-audio toggle. */
+  const applyClipVolume = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    const st = useEditorStore.getState();
+    const loc = locateTime(st.clips, st.playhead, st.project);
+    if (!loc) return;
+    video.volume = !st.keepOriginalAudio || clipMuted(loc.clip) ? 0 : clipVolume(loc.clip);
+  };
 
   // Measure the preview stage so the canvas-preset frame can be fitted
   // (letterboxed) inside it and overlay font sizes scale like the export's
@@ -167,6 +182,13 @@ export default function Preview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seekNonce, music]);
 
+  // Per-clip volume changes while paused apply immediately.
+  const keepOriginalAudio = useEditorStore((s) => s.keepOriginalAudio);
+  useEffect(() => {
+    applyClipVolume();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clipsVersion, keepOriginalAudio]);
+
   // Playback loop: sync playhead from the video clock, advance across clips.
   useEffect(() => {
     if (!playing) return;
@@ -192,6 +214,7 @@ export default function Preview() {
             st.setPlayhead(before + Math.max(0, video.currentTime - cur.start) / clipSpeed(cur));
           }
           syncMusic(st.playhead, true);
+          applyClipVolume();
         }
       }
       rafRef.current = requestAnimationFrame(tick);
@@ -243,6 +266,49 @@ export default function Preview() {
   const activeOverlays = textOverlays.filter(
     (o) => o.text.trim().length > 0 && playhead >= o.start && playhead < o.start + o.duration
   );
+
+  /**
+   * Phase 4: preview approximation of the overlay animation preset. The
+   * export is exact (ASS \fad / \move / \t tags — see lib/ass.ts); here we
+   * compute the same phase math from the playhead on every render: an
+   * entrance and an exit window of ~0.35 s, each clamped to half the
+   * item's duration.
+   */
+  const overlayAnimStyle = (o: TextOverlay, frameHeight: number): CSSProperties => {
+    const anim = overlayAnimation(o);
+    if (anim === "none" || o.duration <= 0.05) return {};
+    const half = o.duration / 2;
+    const inS = Math.min(0.35, half);
+    const outS = Math.min(0.35, half);
+    const local = playhead - o.start;
+    const remaining = o.duration - local;
+    const easeOut = (p: number) => 1 - Math.pow(1 - p, 3);
+    if (anim === "fade") {
+      const opacity =
+        local < inS ? easeOut(local / inS) : remaining < outS ? Math.max(0, remaining / outS) : 1;
+      return { opacity };
+    }
+    if (anim === "slide-up") {
+      const dist = Math.max(10, frameHeight * 0.07);
+      if (local < inS) {
+        const p = easeOut(local / inS);
+        return { transform: `translateY(${((1 - p) * dist).toFixed(1)}px)`, opacity: Math.min(1, p * 2) };
+      }
+      if (remaining < outS) return { opacity: Math.max(0, remaining / outS) };
+      return {};
+    }
+    // pop: overshoot in, shrink out
+    if (local < inS) {
+      const p = local / inS;
+      const scale = p < 0.5 ? 0.6 + (0.48 * p) / 0.5 : 1.08 - (0.08 * (p - 0.5)) / 0.5;
+      return { transform: `scale(${scale.toFixed(3)})` };
+    }
+    if (remaining < outS) {
+      const p = 1 - remaining / outS;
+      return { transform: `scale(${(1 - 0.4 * p).toFixed(3)})`, opacity: 1 - p };
+    }
+    return {};
+  };
   const captionFontPx = Math.max(12, frameH * 0.052);
 
   const captionBox = (() => {
@@ -344,6 +410,7 @@ export default function Preview() {
           >
             <div
               className={`text-center ${o.pill ? "rounded-md bg-black/60 px-3 py-1" : ""}`}
+              data-animation={overlayAnimation(o)}
               style={{
                 fontFamily: CAPTION_FONT_STACK,
                 fontSize: Math.max(11, frameH * o.size),
@@ -351,6 +418,7 @@ export default function Preview() {
                 color: o.color,
                 lineHeight: 1.25,
                 textShadow: o.pill ? undefined : "0 1px 6px rgba(0,0,0,.85)",
+                ...overlayAnimStyle(o, frameH),
               }}
             >
               {o.text}
