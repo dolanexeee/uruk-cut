@@ -13,39 +13,125 @@ export interface SourceAsset {
   thumbnails: string[];
 }
 
+/* ---------------- Phase 3 types ---------------- */
+
+export interface ClipAdjust {
+  brightness: number; // -0.5..0.5, 0 = neutral (ffmpeg eq units)
+  contrast: number; // 0.5..1.5, 1 = neutral
+  saturation: number; // 0..2, 1 = neutral
+}
+
+export const DEFAULT_ADJUST: ClipAdjust = { brightness: 0, contrast: 1, saturation: 1 };
+
+export type LookPresetId =
+  | "original"
+  | "warm"
+  | "cool"
+  | "vivid"
+  | "vintage"
+  | "fade"
+  | "golden"
+  | "noir"
+  | "custom";
+
+export type CanvasPresetId = "original" | "9:16" | "16:9" | "1:1" | "4:5";
+export type TransitionType = "none" | "crossfade" | "fadeblack";
+
+export interface ProjectSettings {
+  transitionType: TransitionType;
+  transitionDuration: number; // seconds: 0.3 / 0.5 / 1.0
+  canvasPreset: CanvasPresetId;
+}
+
+export const DEFAULT_PROJECT: ProjectSettings = {
+  transitionType: "none",
+  transitionDuration: 0.5,
+  canvasPreset: "original",
+};
+
 export interface Clip {
   id: string;
   sourceId: string;
   start: number; // in-point, seconds into the source
   end: number; // out-point, seconds into the source
+  speed: number; // playback rate (0.5..2); timeline duration = (end-start)/speed
+  adjust: ClipAdjust;
+  presetId: LookPresetId; // a named look, or "custom" = use `adjust`
 }
 
-export const clipDuration = (c: Clip) => Math.max(0, c.end - c.start);
-export const totalDuration = (clips: Clip[]) =>
-  clips.reduce((acc, c) => acc + clipDuration(c), 0);
+/** Defensive accessors: clips built by older code / QA literals may lack fields. */
+export const clipSpeed = (c: Clip): number =>
+  typeof c.speed === "number" && isFinite(c.speed) && c.speed > 0 ? c.speed : 1;
+export const clipAdjust = (c: Clip): ClipAdjust => c.adjust ?? DEFAULT_ADJUST;
+export const clipPreset = (c: Clip): LookPresetId => c.presetId ?? "original";
+
+export const clipDuration = (c: Clip) =>
+  Math.max(0, (c.end - c.start) / clipSpeed(c));
+
+/**
+ * The effective transition overlap (seconds) for a sequence: the requested
+ * duration, clamped so it fits inside the shortest adjacent segment pair.
+ * 0 when transitions are off, there are fewer than 2 clips, or the clamp
+ * would leave a meaningless sliver.
+ */
+export function transitionOverlap(
+  clips: Clip[],
+  project?: ProjectSettings | null
+): number {
+  if (!project || project.transitionType === "none" || clips.length < 2) return 0;
+  let minPair = Infinity;
+  for (let i = 0; i < clips.length - 1; i++) {
+    minPair = Math.min(minPair, clipDuration(clips[i]), clipDuration(clips[i + 1]));
+  }
+  const d = Math.min(project.transitionDuration || 0, minPair * 0.9);
+  return d >= 0.05 ? d : 0;
+}
+
+export const totalDuration = (clips: Clip[], project?: ProjectSettings | null) =>
+  clips.reduce((acc, c) => acc + clipDuration(c), 0) -
+  transitionOverlap(clips, project) * Math.max(0, clips.length - 1);
+
+/** Timeline start position of each clip, accounting for transition overlaps. */
+export function clipStartOffsets(
+  clips: Clip[],
+  project?: ProjectSettings | null
+): number[] {
+  const overlap = transitionOverlap(clips, project);
+  const arr: number[] = [];
+  let acc = 0;
+  for (let i = 0; i < clips.length; i++) {
+    arr.push(acc);
+    acc += clipDuration(clips[i]) - (i < clips.length - 1 ? overlap : 0);
+  }
+  return arr;
+}
 
 export interface Located {
   index: number;
   clip: Clip;
-  offsetInClip: number; // seconds from the clip's timeline start
+  offsetInClip: number; // seconds from the clip's timeline start (timeline seconds)
   timelineStart: number; // clip's start position on the timeline
 }
 
-/** Find which clip contains timeline time `t` (clamped). */
-export function locateTime(clips: Clip[], t: number): Located | null {
+/** Find which clip contains timeline time `t` (clamped). During a transition
+ *  overlap the outgoing clip wins until its span ends. */
+export function locateTime(
+  clips: Clip[],
+  t: number,
+  project?: ProjectSettings | null
+): Located | null {
   if (clips.length === 0) return null;
-  let acc = 0;
+  const offsets = clipStartOffsets(clips, project);
   for (let i = 0; i < clips.length; i++) {
     const d = clipDuration(clips[i]);
-    if (t < acc + d || i === clips.length - 1) {
+    if (t < offsets[i] + d || i === clips.length - 1) {
       return {
         index: i,
         clip: clips[i],
-        offsetInClip: Math.min(Math.max(t - acc, 0), d),
-        timelineStart: acc,
+        offsetInClip: Math.min(Math.max(t - offsets[i], 0), d),
+        timelineStart: offsets[i],
       };
     }
-    acc += d;
   }
   return null;
 }
@@ -149,6 +235,7 @@ interface EditorState {
   pushHistory: () => void;
   setClipsLive: (clips: Clip[]) => void;
   trimClip: (id: string, start: number, end: number) => void;
+  updateClip: (id: string, patch: Partial<Clip>) => void;
   splitAtPlayhead: () => void;
   deleteSelected: () => void;
   undo: () => void;
@@ -190,6 +277,10 @@ interface EditorState {
   setMusic: (m: MusicTrack | null) => void;
   updateMusic: (patch: Partial<MusicTrack>) => void;
   setKeepOriginalAudio: (b: boolean) => void;
+
+  /* Phase 3 state */
+  project: ProjectSettings;
+  setProject: (patch: Partial<ProjectSettings>) => void;
 }
 
 const snapshot = (clips: Clip[]): Clip[] => clips.map((c) => ({ ...c }));
@@ -221,7 +312,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   addAsset: (asset) => {
     get().pushHistory();
-    const clip: Clip = { id: uid("clip"), sourceId: asset.id, start: 0, end: asset.duration };
+    const clip: Clip = {
+      id: uid("clip"),
+      sourceId: asset.id,
+      start: 0,
+      end: asset.duration,
+      speed: 1,
+      adjust: { ...DEFAULT_ADJUST },
+      presetId: "original",
+    };
     set((s) => ({
       assets: [...s.assets, asset],
       clips: [...s.clips, clip],
@@ -233,14 +332,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   selectClip: (id) => set({ selectedClipId: id }),
 
   seekTo: (t) => {
-    const total = totalDuration(get().clips);
+    const total = totalDuration(get().clips, get().project);
     set((s) => ({
       playhead: Math.min(Math.max(t, 0), total),
       seekNonce: s.seekNonce + 1,
     }));
   },
   setPlayhead: (t) => {
-    const total = totalDuration(get().clips);
+    const total = totalDuration(get().clips, get().project);
     set({ playhead: Math.min(Math.max(t, 0), total) });
   },
   setPlaying: (b) => set({ playing: b }),
@@ -256,7 +355,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((s) => ({
       clips,
       clipsVersion: s.clipsVersion + 1,
-      playhead: Math.min(s.playhead, totalDuration(clips)),
+      playhead: Math.min(s.playhead, totalDuration(clips, s.project)),
     })),
 
   trimClip: (id, start, end) =>
@@ -265,16 +364,27 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       clipsVersion: s.clipsVersion + 1,
     })),
 
+  updateClip: (id, patch) =>
+    set((s) => {
+      const clips = s.clips.map((c) => (c.id === id ? { ...c, ...patch } : c));
+      return {
+        clips,
+        clipsVersion: s.clipsVersion + 1,
+        playhead: Math.min(s.playhead, totalDuration(clips, s.project)),
+      };
+    }),
+
   splitAtPlayhead: () => {
-    const { clips, playhead } = get();
-    const loc = locateTime(clips, playhead);
+    const { clips, playhead, project } = get();
+    const loc = locateTime(clips, playhead, project);
     if (!loc) return;
     const d = clipDuration(loc.clip);
     if (loc.offsetInClip <= 0.05 || loc.offsetInClip >= d - 0.05) return;
     get().pushHistory();
-    const cutSourceTime = loc.clip.start + loc.offsetInClip;
+    // offsetInClip is in timeline seconds; convert back to source seconds.
+    const cutSourceTime = loc.clip.start + loc.offsetInClip * clipSpeed(loc.clip);
     const left: Clip = { ...loc.clip, end: cutSourceTime };
-    const right: Clip = { id: uid("clip"), sourceId: loc.clip.sourceId, start: cutSourceTime, end: loc.clip.end };
+    const right: Clip = { ...loc.clip, id: uid("clip"), start: cutSourceTime };
     const next = [...clips.slice(0, loc.index), left, right, ...clips.slice(loc.index + 1)];
     set((s) => ({ clips: next, selectedClipId: right.id, clipsVersion: s.clipsVersion + 1 }));
   },
@@ -287,7 +397,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((s) => ({
       clips: next,
       selectedClipId: null,
-      playhead: Math.min(s.playhead, totalDuration(next)),
+      playhead: Math.min(s.playhead, totalDuration(next, s.project)),
       clipsVersion: s.clipsVersion + 1,
     }));
   },
@@ -301,7 +411,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         future: [snapshot(s.clips), ...s.future].slice(0, 100),
         clips: prev,
         selectedClipId: s.selectedClipId && prev.some((c) => c.id === s.selectedClipId) ? s.selectedClipId : null,
-        playhead: Math.min(s.playhead, totalDuration(prev)),
+        playhead: Math.min(s.playhead, totalDuration(prev, s.project)),
         clipsVersion: s.clipsVersion + 1,
       };
     }),
@@ -314,7 +424,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         future: rest,
         past: [...s.past, snapshot(s.clips)],
         clips: next,
-        playhead: Math.min(s.playhead, totalDuration(next)),
+        playhead: Math.min(s.playhead, totalDuration(next, s.project)),
         clipsVersion: s.clipsVersion + 1,
       };
     }),
@@ -410,4 +520,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   updateMusic: (patch) =>
     set((s) => (s.music ? { music: { ...s.music, ...patch } } : s)),
   setKeepOriginalAudio: (b) => set({ keepOriginalAudio: b }),
+
+  project: { ...DEFAULT_PROJECT },
+  setProject: (patch) =>
+    set((s) => {
+      const project = { ...s.project, ...patch };
+      return {
+        project,
+        playhead: Math.min(s.playhead, totalDuration(s.clips, project)),
+      };
+    }),
 }));

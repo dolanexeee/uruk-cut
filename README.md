@@ -10,6 +10,10 @@ server-side rendering, no account. It is the first application in the
 - **Desktop app:** the same UI in a Tauri v2 shell, with export rendered by a
   bundled **native FFmpeg** binary instead of WebAssembly — see
   [Desktop app](#desktop-app-phase-15).
+- **Parity:** what "the core of a short-form editor" means for this project
+  is defined as an explicit 30-item checklist in **[PARITY.md](./PARITY.md)**
+  — currently **88.3%** of that defined surface is built (score computed
+  there, never rounded up, with the out-of-scope list printed next to it).
 
 ## Deployment (web)
 
@@ -88,6 +92,35 @@ leaves your device.
   and 0–2 s fade-in/fade-out. A project toggle keeps or mutes the original
   clip audio. The preview plays the music in sync (fades approximated by
   volume ramps); exports mix it precisely with FFmpeg `afade` + `amix`.
+
+## Phase-3 features
+
+- **Per-clip adjustments** — brightness / contrast / saturation sliders per
+  clip (Adjust tab). The preview applies the matching CSS `filter`; exports
+  apply FFmpeg `eq` in the segment filter chain — same values, both
+  pipelines.
+- **Look presets** — eight one-tap looks per clip (Original, Warm, Cool,
+  Vivid, Vintage, Fade, Golden, Noir), each a named FFmpeg filter chain
+  (`eq` / `colorbalance` / `colorchannelmixer`) with a CSS approximation
+  for the preview. Model: a clip uses *either* a preset *or* the manual
+  sliders — picking a preset selects it; touching a slider switches the
+  clip to "Custom" and the sliders take over.
+- **Transitions** — a project-level setting: None / Crossfade / Dip to
+  black, 0.3 / 0.5 / 1.0 s. Exports rebuild the join with `xfade` +
+  `acrossfade` (the requested duration is clamped to fit the shortest
+  adjacent pair of clips), so the total duration shrinks by
+  overlap × (clips − 1) — the timeline, preview total and progress all use
+  the same math. **The preview transition is an approximation** (the
+  outgoing clip dips toward the boundary); the exported blend is exact.
+- **Canvas / aspect presets** — Original, 9:16, 16:9, 1:1, 4:5. The preset
+  fixes the export canvas aspect: the canonical size (9:16 → 1080×1920) is
+  the cap, scaled down — never up — to the largest source's long edge (a
+  360p source exports 9:16 at 360×640). Sources are scaled + padded to the
+  canvas; the preview letterboxes the same frame inside its stage, and
+  caption layout (ASS) uses the same canvas.
+- **Per-clip speed** — 0.5× / 0.75× / 1× / 1.5× / 2× per clip. Clip
+  duration everywhere is `(out − in) / speed`: timeline widths, totals,
+  caption cue mapping, and export (`setpts` + pitch-preserving `atempo`).
 
 **Caption burn-in method (per platform).** Both FFmpeg builds were probed
 for filters (`qa/filter-probe.json`): the WASM core (`@ffmpeg/core`) and
@@ -168,9 +201,16 @@ yet been executed in CI — the first tagged release is its real test.
 - **Large files are constrained by device memory.** Sources and segments are
   held in the browser/WASM memory space; very long or 4K sources may fail on
   low-memory phones. Short-form clips (the app's target) work best.
-- One video track only; no filters or transitions yet — those are planned
-  for later phases. (Captions, text overlays, and a music track arrived in
-  Phase 2 — see above.)
+- One video track only (no picture-in-picture compositing). Filters,
+  transitions, canvas presets and per-clip speed arrived in Phase 3 — see
+  above; per-clip volume, animated text and project save/load are the
+  remaining checklist gaps (see [PARITY.md](./PARITY.md)).
+- **Preview transitions are approximate** (an outgoing-clip dip), and
+  preview look filters are CSS approximations of the export's FFmpeg
+  chains — close, not pixel-identical. Exports are the exact render.
+- The preview stage keeps a 16:9 box and letterboxes portrait canvases
+  inside it, so a 9:16 preview is small on a landscape screen; the export
+  itself is full-resolution.
 - **Whisper runs on the CPU (WASM)** in the browser build, single-threaded
   when the page is not cross-origin-isolated: transcription of a short
   clip takes noticeably longer than the clip itself, and the first run
@@ -245,6 +285,13 @@ with captions/text/music + pixel-diff burn proof), and
 `qa/native-plan-test.mjs` (executes the app's shared final-pass command
 builder verbatim through the native sidecar, with the same probes).
 
+Phase 3 adds: `qa/export-phase3.mjs` (compiles the app's shared
+sequence/look/render modules and executes the plans through the native
+sidecar: look pixel-diffs, crossfade/dip-to-black duration proofs, speed
+segment proofs, canvas-size probes → `qa/export-phase3-results.json`) and
+`qa/phase3-ui.mjs` (drives the real UI: Adjust tab, speed + transition +
+canvas controls, and a WASM export through the xfade join).
+
 ## Project status
 
 - **Phase 1 (done):** browser editor — import, timeline, trim/split/reorder,
@@ -256,7 +303,12 @@ builder verbatim through the native sidecar, with the same probes).
   word timings, karaoke), caption styles, text overlays, music track with
   fades — all rendered in preview and burned/mixed into exports on both
   the WASM and native pipelines (ASS via libass; see Phase-2 section).
-- Later phases: more tracks and effects.
+- **Phase 3 (done):** per-clip adjustments + look presets, transitions
+  (crossfade / dip-to-black), canvas aspect presets, per-clip speed — see
+  the Phase-3 section and [PARITY.md](./PARITY.md) (88.3% of the defined
+  core-use surface).
+- Later phases: the remaining checklist gaps (per-clip volume, animated
+  text, project save/load).
 
 ## License
 

@@ -2,11 +2,13 @@ import type {
   CaptionStyleId,
   Clip,
   MusicTrack,
+  ProjectSettings,
   SourceAsset,
   TextOverlay,
   CaptionCue,
+  TransitionType,
 } from "../store/editor";
-import { musicDuration, totalDuration } from "../store/editor";
+import { DEFAULT_PROJECT, musicDuration, totalDuration } from "../store/editor";
 import { buildTimelineCues, outputCanvas } from "./captions";
 import { buildAss } from "./ass";
 
@@ -35,6 +37,10 @@ export interface ExportExtras {
   } | null;
   keepOriginalAudio: boolean;
   totalDuration: number;
+  /** Phase 3: output canvas (aspect preset applied). */
+  canvas: { width: number; height: number };
+  /** Phase 3: requested transition (exporters clamp via transitionOverlap). */
+  transition: { type: TransitionType; duration: number };
 }
 
 export interface FinalPassPaths {
@@ -63,17 +69,19 @@ export function buildExportExtras(state: {
   textOverlays: TextOverlay[];
   music: MusicTrack | null;
   keepOriginalAudio: boolean;
+  project?: ProjectSettings;
 }): ExportExtras {
-  const total = totalDuration(state.clips);
+  const project = state.project ?? DEFAULT_PROJECT;
+  const total = totalDuration(state.clips, project);
+  const canvas = outputCanvas(state.clips, state.assets, project.canvasPreset);
   let assContent: string | null = null;
   const cues = state.captionsEnabled
-    ? buildTimelineCues(state.clips, state.captionsByAsset)
+    ? buildTimelineCues(state.clips, state.captionsByAsset, project)
     : [];
   if (cues.length > 0 || state.textOverlays.length > 0) {
-    const { width, height } = outputCanvas(state.clips, state.assets);
     assContent = buildAss({
-      width,
-      height,
+      width: canvas.width,
+      height: canvas.height,
       captionStyle: state.captionStyle,
       cues,
       overlays: state.textOverlays,
@@ -94,6 +102,11 @@ export function buildExportExtras(state: {
       : null,
     keepOriginalAudio: state.keepOriginalAudio,
     totalDuration: total,
+    canvas,
+    transition: {
+      type: project.transitionType,
+      duration: project.transitionDuration,
+    },
   };
 }
 

@@ -1,7 +1,9 @@
 import {
   clipDuration,
+  DEFAULT_PROJECT,
   totalDuration,
   type Clip,
+  type ProjectSettings,
   type SourceAsset,
 } from "../store/editor";
 import type { ExportCallbacks } from "./export";
@@ -10,6 +12,7 @@ import {
   needsFinalPass,
   type ExportExtras,
 } from "./finalpass";
+import { buildJoinArgs, segmentAudioFilter, segmentVideoFilter } from "./render";
 
 const FONT_FILES = ["NotoSansArabic.ttf", "Inter.ttf"];
 
@@ -24,8 +27,6 @@ const FONT_FILES = ["NotoSansArabic.ttf", "Inter.ttf"];
  *   and the joined MP4 is read back and returned as a Blob — exactly the
  *   contract the web flow fulfills.
  */
-
-const even = (n: number) => Math.max(2, Math.floor(n / 2) * 2);
 
 function extOf(name: string): string {
   const m = /\.([a-zA-Z0-9]{2,5})$/.exec(name);
@@ -56,18 +57,11 @@ export async function exportVideoNative(
 
   cb.onStage({ type: "preparing" }, 0);
 
-  // Uniform output canvas: largest source, capped at 1920x1080 (same as web).
-  let W = 2;
-  let H = 2;
   for (const c of clips) {
-    const a = byId.get(c.sourceId);
-    if (!a) throw new Error("A clip references a missing source");
-    W = Math.max(W, Math.min(a.width, 1920));
-    H = Math.max(H, Math.min(a.height, 1080));
+    if (!byId.get(c.sourceId)) throw new Error("A clip references a missing source");
   }
-  W = even(W);
-  H = even(H);
-  const vf = `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p`;
+  // Uniform output canvas from the Phase-3 plan (aspect preset applied).
+  const { width: W, height: H } = extras.canvas;
 
   const tmp = await pathApi.tempDir();
   const work = await pathApi.join(tmp, `uruk-cut-export-${Date.now()}`);
@@ -115,6 +109,7 @@ export async function exportVideoNative(
       const probe = await run(["-hide_banner", "-i", inPath]);
       const hasAudio = /Stream #\d+:\d+.*: Audio:/.test(probe.output);
 
+      const af = segmentAudioFilter(clip);
       const common = [
         "-c:v", "libx264",
         "-preset", "veryfast",
@@ -122,7 +117,8 @@ export async function exportVideoNative(
         "-b:a", "160k",
         "-ar", "48000",
         "-ac", "2",
-        "-vf", vf,
+        "-vf", segmentVideoFilter(clip, W, H),
+        ...(af ? ["-af", af] : []),
         "-t", dur.toFixed(3),
         "-movflags", "+faststart",
         segPath,
@@ -156,12 +152,20 @@ export async function exportVideoNative(
     }
 
     cb.onStage({ type: "joining" }, (total / denom) * 0.98);
-    const listPath = await pathApi.join(work, "list.txt");
-    const list = segPaths.map((s) => `file '${s.replace(/'/g, "'\\''")}'`).join("\n");
-    await fs.writeFile(listPath, new TextEncoder().encode(list));
     const basePath = await pathApi.join(work, "base.mp4");
     const outPath = await pathApi.join(work, "uruk-cut-export.mp4");
-    const join = await run(["-y", "-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", basePath]);
+    const projectLike: ProjectSettings = {
+      ...DEFAULT_PROJECT,
+      transitionType: extras.transition.type,
+      transitionDuration: extras.transition.duration,
+    };
+    const listPath = await pathApi.join(work, "list.txt");
+    const plan = buildJoinArgs(segPaths, clips, projectLike, basePath, listPath);
+    if (plan.usesList) {
+      const list = segPaths.map((s) => `file '${s.replace(/'/g, "'\\''")}'`).join("\n");
+      await fs.writeFile(listPath, new TextEncoder().encode(list));
+    }
+    const join = await run(["-y", ...plan.args]);
     if (join.code !== 0) {
       throw new Error(`Joining segments failed (exit ${join.code}): ${join.output.slice(-400)}`);
     }
@@ -208,7 +212,7 @@ export async function exportVideoNative(
       stage = "finishing";
       progBase = ((total + 0.25) / denom) * 0.98;
       progScale = (1 / denom) * 0.98;
-      progDur = Math.max(0.1, totalDuration(clips));
+      progDur = Math.max(0.1, extras.totalDuration || totalDuration(clips));
       active = true;
       const pass = await run(["-y", ...args]);
       active = false;

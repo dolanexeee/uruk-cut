@@ -1,11 +1,19 @@
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile, toBlobURL } from "@ffmpeg/util";
-import { clipDuration, type Clip, type ExportStage, type SourceAsset } from "../store/editor";
+import {
+  clipDuration,
+  DEFAULT_PROJECT,
+  type Clip,
+  type ExportStage,
+  type ProjectSettings,
+  type SourceAsset,
+} from "../store/editor";
 import {
   buildFinalPassArgs,
   needsFinalPass,
   type ExportExtras,
 } from "./finalpass";
+import { buildJoinArgs, segmentAudioFilter, segmentVideoFilter } from "./render";
 
 let ffmpeg: FFmpeg | null = null;
 let loaded = false;
@@ -26,8 +34,6 @@ async function ensureLoaded(): Promise<FFmpeg> {
   }
   return ffmpeg;
 }
-
-const even = (n: number) => Math.max(2, Math.floor(n / 2) * 2);
 
 function extOf(name: string): string {
   const m = /\.([a-zA-Z0-9]{2,5})$/.exec(name);
@@ -105,18 +111,11 @@ async function exportVideoWasm(
   cb.onStage({ type: "preparing" }, 0);
   const ff = await ensureLoaded();
 
-  // Uniform output canvas: largest source, capped at 1920x1080.
-  let W = 2;
-  let H = 2;
   for (const c of clips) {
-    const a = byId.get(c.sourceId);
-    if (!a) throw new Error("A clip references a missing source");
-    W = Math.max(W, Math.min(a.width, 1920));
-    H = Math.max(H, Math.min(a.height, 1080));
+    if (!byId.get(c.sourceId)) throw new Error("A clip references a missing source");
   }
-  W = even(W);
-  H = even(H);
-  const vf = `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p`;
+  // Uniform output canvas from the Phase-3 plan (aspect preset applied).
+  const { width: W, height: H } = extras.canvas;
 
   const segNames: string[] = [];
   const extraFiles: string[] = [];
@@ -144,6 +143,7 @@ async function exportVideoWasm(
       };
       ff.on("progress", progressHandler);
 
+      const af = segmentAudioFilter(clip);
       const common = [
         "-c:v", "libx264",
         "-preset", "veryfast",
@@ -151,7 +151,8 @@ async function exportVideoWasm(
         "-b:a", "160k",
         "-ar", "48000",
         "-ac", "2",
-        "-vf", vf,
+        "-vf", segmentVideoFilter(clip, W, H),
+        ...(af ? ["-af", af] : []),
         "-t", dur.toFixed(3),
         "-movflags", "+faststart",
         segName,
@@ -175,11 +176,19 @@ async function exportVideoWasm(
     }
 
     cb.onStage({ type: "joining" }, (total / denom) * 0.98);
-    const list = segNames.map((s) => `file '${s}'`).join("\n");
-    await ff.writeFile("list.txt", new TextEncoder().encode(list));
     const baseName = "base.mp4";
     const outName = "uruk-cut-export.mp4";
-    const code = await ff.exec(["-f", "concat", "-safe", "0", "-i", "list.txt", "-c", "copy", baseName]);
+    const projectLike: ProjectSettings = {
+      ...DEFAULT_PROJECT,
+      transitionType: extras.transition.type,
+      transitionDuration: extras.transition.duration,
+    };
+    const join = buildJoinArgs(segNames, clips, projectLike, baseName, "list.txt");
+    if (join.usesList) {
+      const list = segNames.map((s) => `file '${s}'`).join("\n");
+      await ff.writeFile("list.txt", new TextEncoder().encode(list));
+    }
+    const code = await ff.exec(join.args);
     if (code !== 0) throw new Error(`Joining segments failed (exit ${code})`);
 
     let finalName = baseName;

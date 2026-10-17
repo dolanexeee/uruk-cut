@@ -3,6 +3,8 @@
 import { useMemo, useRef } from "react";
 import {
   clipDuration,
+  clipSpeed,
+  clipStartOffsets,
   musicDuration,
   totalDuration,
   useEditorStore,
@@ -38,28 +40,21 @@ export default function Timeline() {
   const textOverlays = useEditorStore((s) => s.textOverlays);
   const selectedTextId = useEditorStore((s) => s.selectedTextId);
   const music = useEditorStore((s) => s.music);
+  const project = useEditorStore((s) => s.project);
 
   const tlCues = useMemo(
-    () => (captionsEnabled ? buildTimelineCues(clips, captionsByAsset) : []),
-    [clips, captionsByAsset, captionsEnabled]
+    () => (captionsEnabled ? buildTimelineCues(clips, captionsByAsset, project) : []),
+    [clips, captionsByAsset, captionsEnabled, project]
   );
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const drag = useRef<DragState>(null);
 
-  const total = totalDuration(clips);
+  const total = totalDuration(clips, project);
   const contentW = Math.max(total * pxPerSec + 80, 300);
 
-  const offsets = useMemo(() => {
-    const arr: number[] = [];
-    let acc = 0;
-    for (const c of clips) {
-      arr.push(acc);
-      acc += clipDuration(c);
-    }
-    return arr;
-  }, [clips]);
+  const offsets = useMemo(() => clipStartOffsets(clips, project), [clips, project]);
 
   const assetById = (id: string) => assets.find((a) => a.id === id);
 
@@ -295,7 +290,7 @@ export default function Timeline() {
               const thumbs: string[] = [];
               for (let sIdx = 0; sIdx < slotCount; sIdx++) {
                 const frac = slotCount === 1 ? 0 : sIdx / slotCount;
-                const srcTime = clip.start + frac * dur;
+                const srcTime = clip.start + frac * (clip.end - clip.start);
                 const ti =
                   asset.thumbnails.length === 0
                     ? -1
@@ -338,6 +333,11 @@ export default function Timeline() {
                   </div>
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/60 px-1.5 py-0.5 text-[10px] text-zinc-200">
                     {asset.name} · {dur.toFixed(1)}s
+                    {clipSpeed(clip) !== 1 && (
+                      <span className="ms-1 rounded bg-[#d9a441]/30 px-1 text-[#f3cd8a]" dir="ltr">
+                        {clipSpeed(clip)}×
+                      </span>
+                    )}
                   </div>
                   {/* trim handles */}
                   <div

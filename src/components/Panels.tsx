@@ -6,10 +6,11 @@ import { dict } from "../i18n";
 import CaptionsPanel from "./CaptionsPanel";
 import TextPanel from "./TextPanel";
 import MusicPanel from "./MusicPanel";
+import AdjustPanel from "./AdjustPanel";
 
-type Tab = "captions" | "text" | "music";
+type Tab = "captions" | "text" | "music" | "adjust";
 
-/** Phase-2 tabbed panel area: captions / text overlays / music. */
+/** Tabbed panel area: captions / text overlays / music / clip adjust (Phase 2–3). */
 export default function Panels() {
   const lang = useEditorStore((s) => s.lang);
   const t = dict[lang];
@@ -37,10 +38,12 @@ export default function Panels() {
         {tabBtn("captions", `CC ${t.tabCaptions}`)}
         {tabBtn("text", `T ${t.tabText}`)}
         {tabBtn("music", `♪ ${t.tabMusic}`)}
+        {tabBtn("adjust", `◐ ${t.tabAdjust}`)}
       </div>
       {tab === "captions" && <CaptionsPanel />}
       {tab === "text" && <TextPanel />}
       {tab === "music" && <MusicPanel />}
+      {tab === "adjust" && <AdjustPanel />}
     </section>
   );
 }

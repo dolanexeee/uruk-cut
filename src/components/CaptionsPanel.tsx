@@ -78,7 +78,7 @@ export default function CaptionsPanel() {
     const cue = (st.captionsByAsset[asset.id] || []).find((c) => c.id === cueId);
     if (!cue) return;
     st.selectCue({ assetId: asset.id, cueId });
-    const target = seekTargetForCue(st.clips, asset.id, cue);
+    const target = seekTargetForCue(st.clips, asset.id, cue, st.project);
     if (target !== null) st.seekTo(target);
   };
 

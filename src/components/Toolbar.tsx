@@ -22,8 +22,9 @@ export default function Toolbar() {
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
   const requestImport = useEditorStore((s) => s.requestImport);
+  const project = useEditorStore((s) => s.project);
 
-  const loc = locateTime(clips, playhead);
+  const loc = locateTime(clips, playhead, project);
   const canSplit =
     !!loc && loc.offsetInClip > 0.05 && loc.offsetInClip < clipDuration(loc.clip) - 0.05;
 

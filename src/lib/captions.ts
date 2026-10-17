@@ -1,17 +1,36 @@
 import {
-  clipDuration,
+  clipSpeed,
+  clipStartOffsets,
+  type CanvasPresetId,
   type CaptionCue,
   type Clip,
+  type ProjectSettings,
   type WordTiming,
 } from "../store/editor";
 import { uid } from "./media";
 
-/** Uniform output canvas: largest source, capped at 1920x1080 (same rule as the exporters). */
+const even = (n: number) => Math.max(2, Math.floor(n / 2) * 2);
+
+/** Canonical (maximum) canvas sizes for the aspect presets. */
+export const CANVAS_CAPS: Record<Exclude<CanvasPresetId, "original">, [number, number]> = {
+  "9:16": [1080, 1920],
+  "16:9": [1920, 1080],
+  "1:1": [1080, 1080],
+  "4:5": [1080, 1350],
+};
+
+/**
+ * Uniform output canvas. "original" keeps the Phase-1 rule: largest source,
+ * capped at 1920x1080. A preset fixes the aspect ratio: the canvas is the
+ * preset's canonical size, scaled down (never up) so its long edge does not
+ * exceed the largest source's long edge — a 640x360 source in 9:16 yields a
+ * 360x640 canvas, a 1080p+ source yields exactly 1080x1920.
+ */
 export function outputCanvas(
   clips: Clip[],
-  assets: { id: string; width: number; height: number }[]
+  assets: { id: string; width: number; height: number }[],
+  preset: CanvasPresetId = "original"
 ): { width: number; height: number } {
-  const even = (n: number) => Math.max(2, Math.floor(n / 2) * 2);
   const byId = new Map(assets.map((a) => [a.id, a]));
   let W = 2;
   let H = 2;
@@ -21,7 +40,14 @@ export function outputCanvas(
     W = Math.max(W, Math.min(a.width, 1920));
     H = Math.max(H, Math.min(a.height, 1080));
   }
-  return { width: even(W), height: even(H) };
+  if (preset === "original" || clips.length === 0) return { width: even(W), height: even(H) };
+  const [capW, capH] = CANVAS_CAPS[preset];
+  const aspect = capW / capH;
+  const longEdge = Math.min(Math.max(capW, capH), Math.max(W, H));
+  if (aspect >= 1) {
+    return { width: even(longEdge), height: even(longEdge / aspect) };
+  }
+  return { width: even(longEdge * aspect), height: even(longEdge) };
 }
 
 /**
@@ -109,31 +135,36 @@ export interface TimelineCue extends CaptionCue {
 
 /**
  * Map per-asset cues through the timeline clips: each clip contributes the
- * slice of its asset's cues that intersects its [start, end] trim, shifted
- * into timeline coordinates. Word timings are clipped + shifted along.
+ * slice of its asset's cues that intersects its [start, end] trim, mapped
+ * into timeline coordinates. The mapping honors Phase-3 speed (source
+ * seconds are divided by the clip's speed) and transition overlaps (clip
+ * starts come from clipStartOffsets), so a cue lands where the export —
+ * which plays the same source range at the same speed — actually shows it.
  */
 export function buildTimelineCues(
   clips: Clip[],
-  captionsByAsset: Record<string, CaptionCue[]>
+  captionsByAsset: Record<string, CaptionCue[]>,
+  project?: ProjectSettings | null
 ): TimelineCue[] {
   const out: TimelineCue[] = [];
-  let acc = 0;
-  for (const clip of clips) {
-    const dur = clipDuration(clip);
+  const offsets = clipStartOffsets(clips, project);
+  clips.forEach((clip, idx) => {
+    const acc = offsets[idx];
+    const speed = clipSpeed(clip);
     const cues = captionsByAsset[clip.sourceId] || [];
     for (const cue of cues) {
       const s = Math.max(cue.start, clip.start);
       const e = Math.min(cue.end, clip.end);
       if (e - s <= 0.01) continue;
-      const shift = acc - clip.start;
+      const map = (srcT: number) => acc + (srcT - clip.start) / speed;
       let words: WordTiming[] | undefined;
       if (cue.words && cue.words.length > 0) {
         words = cue.words
           .filter((w) => w.end > s && w.start < e)
           .map((w) => ({
             word: w.word,
-            start: Math.max(w.start, s) + shift,
-            end: Math.min(w.end, e) + shift,
+            start: map(Math.max(w.start, s)),
+            end: map(Math.min(w.end, e)),
           }));
         if (words.length === 0) words = undefined;
       }
@@ -141,16 +172,15 @@ export function buildTimelineCues(
         id: cue.id,
         assetId: clip.sourceId,
         clipId: clip.id,
-        start: s + shift,
-        end: e + shift,
-        timelineStart: s + shift,
-        timelineEnd: e + shift,
+        start: map(s),
+        end: map(e),
+        timelineStart: map(s),
+        timelineEnd: map(e),
         text: cue.text,
         words,
       });
     }
-    acc += dur;
-  }
+  });
   return out.sort((a, b) => a.timelineStart - b.timelineStart);
 }
 
@@ -158,17 +188,17 @@ export function buildTimelineCues(
 export function seekTargetForCue(
   clips: Clip[],
   assetId: string,
-  cue: CaptionCue
+  cue: CaptionCue,
+  project?: ProjectSettings | null
 ): number | null {
-  let acc = 0;
-  for (const clip of clips) {
-    const dur = clipDuration(clip);
+  const offsets = clipStartOffsets(clips, project);
+  for (let i = 0; i < clips.length; i++) {
+    const clip = clips[i];
     if (clip.sourceId === assetId) {
       const s = Math.max(cue.start, clip.start);
       const e = Math.min(cue.end, clip.end);
-      if (e - s > 0.01) return acc + (s - clip.start) + 0.01;
+      if (e - s > 0.01) return offsets[i] + (s - clip.start) / clipSpeed(clip) + 0.01;
     }
-    acc += dur;
   }
   return null;
 }

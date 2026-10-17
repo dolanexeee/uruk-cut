@@ -3,12 +3,17 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   clipDuration,
+  clipSpeed,
+  clipStartOffsets,
   locateTime,
   musicDuration,
   totalDuration,
+  transitionOverlap,
   useEditorStore,
   type CaptionCue,
 } from "../store/editor";
+import { outputCanvas } from "../lib/captions";
+import { clipLookCss } from "../lib/looks";
 import { dict } from "../i18n";
 
 const CAPTION_FONT_STACK = '"Noto Sans Arabic", "Inter", system-ui, sans-serif';
@@ -37,20 +42,23 @@ export default function Preview() {
   const captionStyle = useEditorStore((s) => s.captionStyle);
   const textOverlays = useEditorStore((s) => s.textOverlays);
   const music = useEditorStore((s) => s.music);
+  const project = useEditorStore((s) => s.project);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
-  const [frameH, setFrameH] = useState(0);
+  const [box, setBox] = useState({ w: 0, h: 0 });
 
-  // Measure the preview frame so overlay font sizes scale like the export's
+  // Measure the preview stage so the canvas-preset frame can be fitted
+  // (letterboxed) inside it and overlay font sizes scale like the export's
   // (ASS sizes are fractions of frame height).
   useEffect(() => {
     const el = frameRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setFrameH(el.clientHeight));
+    const update = () => setBox({ w: el.clientWidth, h: el.clientHeight });
+    const ro = new ResizeObserver(update);
     ro.observe(el);
-    setFrameH(el.clientHeight);
+    update();
     return () => ro.disconnect();
   }, []);
 
@@ -88,7 +96,7 @@ export default function Preview() {
   const loadedSrc = useRef<string | null>(null);
   const rafRef = useRef<number>(0);
 
-  const total = totalDuration(clips);
+  const total = totalDuration(clips, project);
   const assetById = (id: string) => assets.find((a) => a.id === id);
 
   /** Align the <video> element to the store playhead. */
@@ -96,7 +104,7 @@ export default function Preview() {
     const video = videoRef.current;
     if (!video) return;
     const st = useEditorStore.getState();
-    const loc = locateTime(st.clips, st.playhead);
+    const loc = locateTime(st.clips, st.playhead, st.project);
     if (!loc) {
       video.removeAttribute("src");
       loadedClipId.current = null;
@@ -105,7 +113,8 @@ export default function Preview() {
     }
     const asset = assetById(loc.clip.sourceId);
     if (!asset) return;
-    const targetTime = loc.clip.start + loc.offsetInClip;
+    video.playbackRate = clipSpeed(loc.clip);
+    const targetTime = loc.clip.start + loc.offsetInClip * clipSpeed(loc.clip);
     const needsLoad = loadedClipId.current !== loc.clip.id || loadedSrc.current !== asset.url;
     if (needsLoad) {
       loadedClipId.current = loc.clip.id;
@@ -139,7 +148,7 @@ export default function Preview() {
     const video = videoRef.current;
     if (!video) return;
     if (playing) {
-      if (clips.length > 0 && totalDuration(clips) - useEditorStore.getState().playhead < 0.05) {
+      if (clips.length > 0 && totalDuration(clips, project) - useEditorStore.getState().playhead < 0.05) {
         seekTo(0);
       }
       align(true);
@@ -165,12 +174,10 @@ export default function Preview() {
       const video = videoRef.current;
       const st = useEditorStore.getState();
       if (video && loadedClipId.current) {
-        const loc = locateTime(st.clips, st.playhead);
         const cur = st.clips.find((c) => c.id === loadedClipId.current);
         if (cur) {
           const idx = st.clips.indexOf(cur);
-          let before = 0;
-          for (let i = 0; i < idx; i++) before += clipDuration(st.clips[i]);
+          const before = clipStartOffsets(st.clips, st.project)[idx] ?? 0;
           if (video.currentTime >= cur.end - 0.02) {
             const next = st.clips[idx + 1];
             if (next) {
@@ -178,14 +185,13 @@ export default function Preview() {
               st.setPlayhead(before + clipDuration(cur) + 0.001);
               align(true);
             } else {
-              st.setPlayhead(totalDuration(st.clips));
+              st.setPlayhead(totalDuration(st.clips, st.project));
               st.setPlaying(false);
             }
           } else {
-            st.setPlayhead(before + Math.max(0, video.currentTime - cur.start));
+            st.setPlayhead(before + Math.max(0, video.currentTime - cur.start) / clipSpeed(cur));
           }
           syncMusic(st.playhead, true);
-          void loc;
         }
       }
       rafRef.current = requestAnimationFrame(tick);
@@ -201,8 +207,33 @@ export default function Preview() {
   };
 
   // Active caption cue + text overlays at the current playhead.
-  const locNow = locateTime(clips, playhead);
-  const assetTime = locNow ? locNow.clip.start + locNow.offsetInClip : 0;
+  const locNow = locateTime(clips, playhead, project);
+  const assetTime = locNow
+    ? locNow.clip.start + locNow.offsetInClip * clipSpeed(locNow.clip)
+    : 0;
+
+  // Canvas-preset frame fitted into the 16:9 stage (letterbox).
+  const canvas =
+    clips.length > 0 ? outputCanvas(clips, assets, project.canvasPreset) : { width: 16, height: 9 };
+  const fitScale =
+    box.w > 0 && box.h > 0 ? Math.min(box.w / canvas.width, box.h / canvas.height) : 0;
+  const innerW = fitScale > 0 ? Math.floor(canvas.width * fitScale) : undefined;
+  const innerH = fitScale > 0 ? Math.floor(canvas.height * fitScale) : undefined;
+  const frameH = innerH ?? box.h;
+
+  // Look of the current clip (CSS approximation) + transition fade. The
+  // preview transition is an approximation: the outgoing clip dips toward
+  // the boundary; the export's xfade blend is exact.
+  const lookCss = locNow ? clipLookCss(locNow.clip) : "";
+  let frameOpacity = 1;
+  const overlap = transitionOverlap(clips, project);
+  if (locNow && overlap > 0 && locNow.index < clips.length - 1) {
+    const remaining = clipDuration(locNow.clip) - locNow.offsetInClip;
+    if (remaining < overlap) {
+      const p = 1 - remaining / overlap;
+      frameOpacity = project.transitionType === "fadeblack" ? 1 - p : 1 - 0.75 * p;
+    }
+  }
   const activeCue: CaptionCue | undefined =
     captionsEnabled && locNow
       ? (captionsByAsset[locNow.clip.sourceId] || []).find(
@@ -280,20 +311,23 @@ export default function Preview() {
         ref={frameRef}
         className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-lg border border-zinc-800 bg-black"
       >
-        <div className="aspect-video w-full">
-          <video
-            ref={videoRef}
-            className="h-full w-full object-contain"
-            playsInline
-            preload="auto"
-            onClick={togglePlay}
-          />
-        </div>
-        {clips.length === 0 && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-zinc-500">
-            {t.tagline}
-          </div>
-        )}
+        <div className="flex aspect-video w-full items-center justify-center">
+          <div
+            className="relative overflow-hidden"
+            data-testid="preview-frame"
+            style={{ width: innerW ?? "100%", height: innerH ?? "100%" }}
+          >
+            <video
+              ref={videoRef}
+              className="h-full w-full object-contain"
+              style={{
+                filter: lookCss || undefined,
+                opacity: frameOpacity,
+              }}
+              playsInline
+              preload="auto"
+              onClick={togglePlay}
+            />
         {/* Text overlays */}
         {activeOverlays.map((o) => (
           <div
@@ -327,6 +361,13 @@ export default function Preview() {
         {captionBox && (
           <div className="pointer-events-none absolute inset-x-0 flex justify-center px-4" style={{ bottom: "4.5%" }}>
             {captionBox}
+          </div>
+        )}
+          </div>
+        </div>
+        {clips.length === 0 && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-zinc-500">
+            {t.tagline}
           </div>
         )}
         {/* Music element (preview only; export mixes with ffmpeg) */}

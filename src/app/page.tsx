@@ -8,6 +8,7 @@ import Toolbar from "../components/Toolbar";
 import ImportManager from "../components/ImportManager";
 import ExportPanel from "../components/ExportPanel";
 import Panels from "../components/Panels";
+import ProjectBar from "../components/ProjectBar";
 import { useEditorStore } from "../store/editor";
 import { exportVideo } from "../lib/export";
 import { buildExportExtras } from "../lib/finalpass";
@@ -77,6 +78,7 @@ export default function Page() {
         <ImportManager />
         {clips.length > 0 && <Panels />}
         <div className="mt-auto flex flex-col gap-2 pb-2">
+          {clips.length > 0 && <ProjectBar />}
           <Toolbar />
           <Timeline />
           {clips.length === 0 && (

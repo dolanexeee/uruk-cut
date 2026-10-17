@@ -1,0 +1,22 @@
+{
+  "lookDiffs": {
+    "vivid": {
+      "meanAbsDiff": 3.773129340277778,
+      "pctPixelsChanged": 5.819010416666667
+    },
+    "customSaturation0": {
+      "meanAbsDiff": 179.42115017361112,
+      "pctPixelsChanged": 99.95225694444444
+    }
+  },
+  "transitionDuration": 8.524,
+  "concatDuration": 9.021333,
+  "speedSegmentDurations": {
+    "fast2x": 2,
+    "half": 4
+  },
+  "canvas": {
+    "big": "1080x1920",
+    "small": "360x640"
+  }
+}
