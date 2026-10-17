@@ -1,6 +1,6 @@
 [package]
 name = "uruk-cut"
-version = "0.1.1"
+version = "0.1.2"
 description = "Uruk Cut — clean-room, open-source short-form video editor (desktop shell)"
 authors = ["URUK contributors"]
 edition = "2021"
