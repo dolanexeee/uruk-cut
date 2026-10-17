@@ -15,7 +15,10 @@
 #   Linux   — johnvansickle.com static builds (GPLv3 build of FFmpeg,
 #             shipped UNMODIFIED as a standalone executable next to the app)
 #   Windows — gyan.dev "release essentials" (GPLv3 build, unmodified)
-#   macOS   — evermeet.cx static builds (unmodified)
+#   macOS   — static builds, unmodified: Intel via evermeet.cx direct
+#             release file, Apple Silicon via osxexperts.net. (evermeet's
+#             getrelease/* endpoints were retired — 404/410 as of
+#             2026-10-16 — so do not use them.)
 set -euo pipefail
 
 TRIPLE="${1:-}"
@@ -57,13 +60,13 @@ case "$TRIPLE" in
     ;;
   aarch64-apple-darwin)
     curl -fL --retry 3 -o "$TMP/ff.zip" \
-      https://evermeet.cx/ffmpeg/getrelease/arm64/zip
+      https://www.osxexperts.net/ffmpeg9arm.zip
     unzip -q "$TMP/ff.zip" -d "$TMP"
     cp "$TMP/ffmpeg" "$DEST_DIR/uruk-ffmpeg-$TRIPLE"
     ;;
   x86_64-apple-darwin)
     curl -fL --retry 3 -o "$TMP/ff.zip" \
-      https://evermeet.cx/ffmpeg/getrelease/zip
+      https://evermeet.cx/ffmpeg/ffmpeg-9.0.2.zip
     unzip -q "$TMP/ff.zip" -d "$TMP"
     cp "$TMP/ffmpeg" "$DEST_DIR/uruk-ffmpeg-$TRIPLE"
     ;;
