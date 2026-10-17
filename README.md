@@ -12,7 +12,7 @@
 
 [![Release](https://img.shields.io/github/v/release/dolanexeee/uruk-cut?style=flat-square&color=d9a441)](https://github.com/dolanexeee/uruk-cut/releases)
 [![Desktop build](https://github.com/dolanexeee/uruk-cut/actions/workflows/release-desktop.yml/badge.svg)](https://github.com/dolanexeee/uruk-cut/actions/workflows/release-desktop.yml)
-[![Core parity](https://img.shields.io/badge/core%20parity-98.3%25-d9a441?style=flat-square)](./PARITY.md)
+[![Core parity](https://img.shields.io/badge/core%20parity-100%25-d9a441?style=flat-square)](./PARITY.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](./LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-Web%20·%20Windows%20·%20macOS%20·%20Linux-555?style=flat-square)](#-download)
 
@@ -50,7 +50,7 @@ It is the first application in the **URUK** open-source suite, and it exists in 
 | **macOS** | `.dmg` (Apple Silicon + Intel) from the [latest release](https://github.com/dolanexeee/uruk-cut/releases/latest) |
 | **Linux** | `.deb` · `.rpm` · `.AppImage` from the [latest release](https://github.com/dolanexeee/uruk-cut/releases/latest) |
 
-Desktop installers for Windows and macOS are built by this repository's own CI on every `v*` tag; the Linux installers in the v0.1.0 release were built and verified locally.
+All desktop installers — Windows (.msi/.exe), macOS (.dmg for Intel and Apple Silicon), and Linux (.deb/.rpm/.AppImage) — are built by this repository's own CI on every `v*` tag and attached to the corresponding GitHub Release.
 
 ---
 
@@ -114,7 +114,7 @@ Desktop installers for Windows and macOS are built by this repository's own CI o
 
 "As good as the editor you're used to" is a slogan. Uruk Cut publishes its yardstick instead: **[PARITY.md](./PARITY.md)** defines the core-use surface of a short-form editor as **30 explicit items**, each scored Done (1) / Partial (0.5) / Missing (0), never rounded up, with the out-of-scope list (cloud AI effects, proprietary asset libraries, accounts) printed next to the score.
 
-> **Current score: 98.3% — 29 Done · 1 Partial · 0 Missing.**
+> **Current score: 100% — 30 Done · 0 Partial · 0 Missing.**
 
 Every claim in that file is backed by an automated test or a measured export (durations, loudness in dB, pixel-diffs) in this repository's QA suite.
 

@@ -77,21 +77,22 @@ is not part of the claimed surface (see *Out of scope* below).
 | # | Capability | Status | Delivered |
 |---|-----------|--------|-----------|
 | 28 | Bilingual English / Arabic interface with full RTL layout | Done | Phase 1–2 |
-| 29 | Open-source desktop installers — Linux built + verified locally and attached to the v0.1.0 GitHub Release; Windows/macOS installers are blocked because GitHub Actions is disabled on the owner account (tag push created no run; workflow dispatch returns HTTP 422 "Actions has been disabled for this user") — the release workflow itself is ready | Partial | Phase 1.5, 4 |
+| 29 | Open-source desktop installers — Linux (.deb/.rpm/.AppImage), Windows (.msi/.exe) and macOS (.dmg for Intel and Apple Silicon) built by the release workflow and attached to the v0.1.2 GitHub Release | Done | Phase 1.5, 4 |
 | 30 | Save / load a project to a file | Done | Phase 4 |
 
 ## Current score
 
-**29 Done, 1 Partial, 0 Missing → (29 + 0.5) / 30 = 98.3% of the defined
+**30 Done, 0 Partial, 0 Missing → 30 / 30 = 100% of the defined
 core-use surface.**
 
 Score history: 71.6% before Phase 3 (21 Done, 1 Partial, 8 Missing) →
 88.3% after Phase 3 (items 9, 21, 22, 23, 25 landed) → 98.3% after
-Phase 4 (items 20, 24, 30 landed). The only remaining gap is the Partial
-on desktop installers (#29): Linux installers are built, verified, and
-attached to the v0.1.0 GitHub Release, but the Windows/macOS CI builds
-cannot run while GitHub Actions is disabled on the owner account —
-an account-level switch outside this repo's control, not a code defect.
+Phase 4 (items 20, 24, 30 landed) → 100% with the v0.1.2 release
+(item 29 landed). The installer gap closed once the repo moved to the
+dolanexeee account, where GitHub Actions is enabled: the release
+workflow now builds and attaches Linux (.deb/.rpm/.AppImage), Windows
+(.msi/.exe), and macOS (.dmg for Intel and Apple Silicon) installers
+to every tagged release.
 Phase 4 measurements: per-clip volume 50% = −6.00 dB vs 100%, 0%/mute =
 −91 dB mean (`volumedetect`, `qa/phase4-plan-test.mjs`); animated-text
 slide-up frame diff 10.5% of text-band pixels mid-animation vs settled
