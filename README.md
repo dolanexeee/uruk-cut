@@ -12,7 +12,7 @@ server-side rendering, no account. It is the first application in the
   [Desktop app](#desktop-app-phase-15).
 - **Parity:** what "the core of a short-form editor" means for this project
   is defined as an explicit 30-item checklist in **[PARITY.md](./PARITY.md)**
-  — currently **88.3%** of that defined surface is built (score computed
+  — currently **98.3%** of that defined surface is built (score computed
   there, never rounded up, with the out-of-scope list printed next to it).
 
 ## Deployment (web)
@@ -216,8 +216,17 @@ uses the bundled FFmpeg.
 fetching the correct static FFmpeg per OS through
 `scripts/fetch-sidecar.sh`. It runs on `v*` tags (installers are attached
 to the GitHub Release) and manually via `workflow_dispatch` (installers
-land as workflow artifacts). The workflow is YAML-validated but has not
-yet been executed in CI — the first tagged release is its real test.
+land as workflow artifacts).
+
+**v0.1.0 release state (Phase 4):** the tag was pushed and a release
+exists — but GitHub Actions is **disabled on the owner account**, so no
+CI run could start (the tag push produced zero runs; a manual dispatch
+returns HTTP 422, "Actions has been disabled for this user"). That is an
+account-level switch, not a workflow defect; the workflow stands ready
+and will produce the Windows/macOS installers on its first run after
+Actions is re-enabled. Meanwhile the **Linux** installers attached to
+the v0.1.0 Release are the locally built + verified bundles (.deb /
+.rpm / AppImage) uploaded directly — see PARITY.md item #29.
 
 ## Honest limitations (Phase 1)
 
@@ -346,10 +355,14 @@ mid-animation preview frame).
   the WASM and native pipelines (ASS via libass; see Phase-2 section).
 - **Phase 3 (done):** per-clip adjustments + look presets, transitions
   (crossfade / dip-to-black), canvas aspect presets, per-clip speed — see
-  the Phase-3 section and [PARITY.md](./PARITY.md) (88.3% of the defined
-  core-use surface).
-- Later phases: the remaining checklist gaps (per-clip volume, animated
-  text, project save/load).
+  the Phase-3 section and [PARITY.md](./PARITY.md).
+- **Phase 4 (done):** per-clip volume + mute, animated text (Fade /
+  Slide-up / Pop, ASS-exact in export), save/load projects (`.urukcut`
+  files + IndexedDB autosave with auto-restore) — see the Phase-4
+  section and [PARITY.md](./PARITY.md) (**98.3%** of the defined
+  core-use surface: 29 Done, 1 Partial — the Partial is #29 desktop
+  installers, blocked on the owner account's disabled GitHub Actions,
+  see Releasing).
 
 ## License
 
